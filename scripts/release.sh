@@ -307,12 +307,18 @@ create_github_release() {
 
     log_info "Creating GitHub release..."
 
-    if gh release create "$tag" --title "MailBot $tag" --notes "$notes"; then
+    # Use a temp file to handle special characters and long notes
+    local tmpfile=$(mktemp)
+    echo "$notes" > "$tmpfile"
+
+    if gh release create "$tag" --title "MailBot $tag" --notes-file "$tmpfile"; then
         log_success "GitHub release created"
     else
         log_warning "Failed to create GitHub release"
         log_info "You can create it manually at: https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo 'owner/repo')/releases/new"
     fi
+
+    rm -f "$tmpfile"
 }
 
 # Show release summary

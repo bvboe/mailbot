@@ -1,0 +1,44 @@
+# Clasp config with script ID (contains project-specific IDs)
+.clasp.json
+
+# Local installation config
+.mailbot.conf
+
+# API keys and secrets - NEVER commit these
+api-key.txt
+*.key
+*.pem
+.env
+.env.*
+
+# Node modules
+node_modules/
+
+# npm debug logs
+npm-debug.log*
+
+# ESLint cache
+.eslintcache
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Build output (if any)
+dist/
+build/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

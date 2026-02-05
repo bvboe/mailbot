@@ -1,0 +1,24 @@
+{
+  "name": "mailbot",
+  "version": "1.0.0",
+  "description": "Gmail monitoring bot with LLM analysis and Google Chat notifications",
+  "scripts": {
+    "lint": "eslint src/**/*.gs",
+    "lint:fix": "eslint src/**/*.gs --fix",
+    "push": "./install.sh --push",
+    "open": "./install.sh --open",
+    "status": "./install.sh --status"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-plugin-googleappsscript": "^1.0.4"
+  },
+  "keywords": [
+    "gmail",
+    "google-apps-script",
+    "chatbot",
+    "llm",
+    "anthropic"
+  ],
+  "license": "MIT"
+}

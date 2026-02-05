@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Google Sans', Roboto, Arial, sans-serif;
+      font-size: 13px;
+      margin: 0;
+      padding: 16px;
+      color: #202124;
+    }
+
+    h1 {
+      font-size: 16px;
+      font-weight: 500;
+      margin: 0 0 16px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section {
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 500;
+      color: #5f6368;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      background: white;
+      color: #202124;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    button:hover {
+      background: #f8f9fa;
+      border-color: #202124;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    button.primary {
+      background: #1a73e8;
+      color: white;
+      border-color: #1a73e8;
+    }
+
+    button.primary:hover {
+      background: #1557b0;
+      border-color: #1557b0;
+    }
+
+    button.danger {
+      color: #d93025;
+      border-color: #d93025;
+    }
+
+    button.danger:hover {
+      background: #fce8e6;
+    }
+
+    .icon {
+      font-size: 16px;
+      width: 20px;
+      text-align: center;
+    }
+
+    .status {
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 12px;
+    }
+
+    .status.success {
+      background: #e6f4ea;
+      color: #137333;
+    }
+
+    .status.error {
+      background: #fce8e6;
+      color: #c5221f;
+    }
+
+    .status.info {
+      background: #e8f0fe;
+      color: #1967d2;
+    }
+
+    .status.loading {
+      background: #f8f9fa;
+      color: #5f6368;
+    }
+
+    #status-box {
+      display: none;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #dadce0;
+      border-top-color: #1a73e8;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .job-select {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 8px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid #dadce0;
+      margin: 16px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1><span class="icon">📧</span> MailBot</h1>
+
+  <div id="status-box" class="status"></div>
+
+  <div class="section">
+    <div class="section-title">Run Jobs</div>
+    <select id="job-select" class="job-select">
+      <option value="">Loading jobs...</option>
+    </select>
+    <button onclick="runSelectedJob()">
+      <span class="icon">▶️</span> Run Selected Job
+    </button>
+    <button onclick="dryRunSelectedJob()">
+      <span class="icon">🔍</span> Dry Run (no changes)
+    </button>
+    <button onclick="runAllJobs()" class="primary">
+      <span class="icon">🚀</span> Run All Jobs Now
+    </button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Testing</div>
+    <button onclick="testNotification()">
+      <span class="icon">🔔</span> Send Test Notification
+    </button>
+    <button onclick="validateConfig()">
+      <span class="icon">✓</span> Validate Configuration
+    </button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Setup</div>
+    <button onclick="createLabels()">
+      <span class="icon">🏷️</span> Create Gmail Labels
+    </button>
+    <button onclick="showFilterSuggestions()">
+      <span class="icon">📋</span> Gmail Filter Instructions
+    </button>
+    <button onclick="showHealth()">
+      <span class="icon">💚</span> Health Check
+    </button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Statistics</div>
+    <button onclick="showStatistics()">
+      <span class="icon">📊</span> Show Execution Stats
+    </button>
+  </div>
+
+  <hr>
+
+  <div class="section">
+    <div class="section-title">Scheduler</div>
+    <button onclick="startScheduler()">
+      <span class="icon">▶️</span> Start Scheduler
+    </button>
+    <button onclick="stopScheduler()" class="danger">
+      <span class="icon">⏹️</span> Stop Scheduler
+    </button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Daily Health Report</div>
+    <button onclick="startHealthCheck()">
+      <span class="icon">📬</span> Enable Daily Report
+    </button>
+    <button onclick="stopHealthCheck()" class="danger">
+      <span class="icon">🔕</span> Disable Daily Report
+    </button>
+  </div>
+
+  <script>
+    // Show status message
+    function showStatus(message, type) {
+      var box = document.getElementById('status-box');
+      box.className = 'status ' + type;
+      box.innerHTML = type === 'loading'
+        ? '<span class="spinner"></span>' + message
+        : message;
+      box.style.display = 'block';
+    }
+
+    function hideStatus() {
+      document.getElementById('status-box').style.display = 'none';
+    }
+
+    function showSuccess(message) {
+      showStatus(message, 'success');
+      setTimeout(hideStatus, 5000);
+    }
+
+    function showError(message) {
+      showStatus(message, 'error');
+    }
+
+    // Load jobs on startup
+    function loadJobs() {
+      google.script.run
+        .withSuccessHandler(function(jobs) {
+          var select = document.getElementById('job-select');
+          select.innerHTML = '<option value="">-- Select a job --</option>';
+          jobs.forEach(function(job) {
+            var option = document.createElement('option');
+            option.value = job.name;
+            option.textContent = job.name + (job.enabled ? '' : ' (disabled)');
+            select.appendChild(option);
+          });
+        })
+        .withFailureHandler(function(err) {
+          showError('Failed to load jobs: ' + err.message);
+        })
+        .sidebarGetJobs();
+    }
+
+    // Run selected job
+    function runSelectedJob() {
+      var jobName = document.getElementById('job-select').value;
+      if (!jobName) {
+        showError('Please select a job first');
+        return;
+      }
+      showStatus('Running job: ' + jobName + '...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showSuccess('Job completed: ' + result.emailCount + ' email(s) processed');
+          } else {
+            showError('Job failed: ' + result.error);
+          }
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarRunJob(jobName, false);
+    }
+
+    // Dry run selected job
+    function dryRunSelectedJob() {
+      var jobName = document.getElementById('job-select').value;
+      if (!jobName) {
+        showError('Please select a job first');
+        return;
+      }
+      showStatus('Dry run: ' + jobName + '...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            var msg = 'Dry run completed: ' + result.emailCount + ' email(s) found';
+            if (result.summary) {
+              msg += '<br><br><strong>LLM Response:</strong><br>' + result.summary.substring(0, 500);
+              if (result.summary.length > 500) msg += '...';
+            }
+            showStatus(msg, 'info');
+          } else {
+            showError('Dry run failed: ' + result.error);
+          }
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarRunJob(jobName, true);
+    }
+
+    // Run all jobs
+    function runAllJobs() {
+      showStatus('Running all jobs...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showSuccess('Completed: ' + result.jobsRun + ' job(s) run, ' + result.jobsFailed + ' failed');
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarRunAllJobs();
+    }
+
+    // Test notification
+    function testNotification() {
+      showStatus('Sending test notification...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showSuccess('Test notification sent!');
+          } else {
+            showError('Failed: ' + result.error);
+          }
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarTestNotification();
+    }
+
+    // Validate config
+    function validateConfig() {
+      showStatus('Validating configuration...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          var msg = result.issues.length === 0
+            ? '✓ All checks passed!'
+            : '⚠️ Issues found:<br>• ' + result.issues.join('<br>• ');
+          showStatus(msg, result.issues.length === 0 ? 'success' : 'error');
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarValidateConfig();
+    }
+
+    // Create Gmail labels
+    function createLabels() {
+      showStatus('Creating Gmail labels...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showSuccess('Labels created: ' + result.labels.join(', '));
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarCreateLabels();
+    }
+
+    // Health check
+    function showHealth() {
+      showStatus('Running health check...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          var lines = [];
+          lines.push('Config: ' + (result.config ? '✓' : '✗'));
+          lines.push('Settings: ' + (result.settings ? '✓' : '✗'));
+          lines.push('Jobs: ' + (result.jobs ? '✓' : '✗'));
+          lines.push('Gmail: ' + (result.gmail ? '✓' : '✗'));
+          lines.push('Scheduler: ' + (result.trigger ? '✓ Running' : '✗ Stopped'));
+
+          var allGood = result.config && result.settings && result.jobs && result.gmail;
+          showStatus(lines.join('<br>'), allGood ? 'success' : 'info');
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarHealthCheck();
+    }
+
+    // Start scheduler
+    function startScheduler() {
+      showStatus('Starting scheduler...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showSuccess('Scheduler started! Running every 5 minutes.');
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarStartScheduler();
+    }
+
+    // Stop scheduler
+    function stopScheduler() {
+      showStatus('Stopping scheduler...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showSuccess('Scheduler stopped.');
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarStopScheduler();
+    }
+
+    // Show filter suggestions
+    function showFilterSuggestions() {
+      showStatus('Loading filter suggestions...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.suggestions.length === 0) {
+            showStatus('No jobs configured yet.', 'info');
+            return;
+          }
+          var html = '<strong>Gmail Filter Setup</strong><br><br>';
+          result.suggestions.forEach(function(s) {
+            html += '<strong>' + s.jobName + '</strong> (label: ' + s.label + ')<br>';
+            html += '<ol style="margin: 5px 0 15px 20px; padding: 0;">';
+            s.instructions.forEach(function(step) {
+              if (step.startsWith('   ')) {
+                html += '<li style="list-style: none; margin-left: 10px;">' + step.trim() + '</li>';
+              } else {
+                html += '<li>' + step.replace(/^\d+\.\s*/, '') + '</li>';
+              }
+            });
+            html += '</ol>';
+          });
+          showStatus(html, 'info');
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarGetFilterSuggestions();
+    }
+
+    // Show execution statistics
+    function showStatistics() {
+      showStatus('Loading statistics...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.error) {
+            showError('Error: ' + result.error);
+            return;
+          }
+          var html = '<strong>Execution Statistics</strong><br><br>';
+          html += 'Total runs: ' + result.totalRuns + '<br>';
+          html += 'Success rate: ' + result.successRate + '%<br>';
+          html += 'Runs today: ' + result.runsToday + '<br>';
+          html += 'Runs this week: ' + result.runsThisWeek + '<br>';
+          html += 'Total emails processed: ' + result.totalEmailsProcessed + '<br>';
+          if (result.lastRun) {
+            html += 'Last run: ' + new Date(result.lastRun).toLocaleString() + '<br>';
+          }
+          if (result.lastError) {
+            html += '<br><strong style="color: #c5221f;">Last error:</strong><br>';
+            html += result.lastError.jobName + ': ' + result.lastError.error + '<br>';
+          }
+          if (result.jobStats && result.jobStats.length > 0) {
+            html += '<br><strong>Per-job stats:</strong><br>';
+            result.jobStats.forEach(function(job) {
+              html += '• ' + job.jobName + ': ' + job.runs + ' runs, ' + job.successRate + '% success, ' + job.totalEmails + ' emails<br>';
+            });
+          }
+          showStatus(html, 'info');
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarGetStatistics();
+    }
+
+    // Start health check
+    function startHealthCheck() {
+      showStatus('Enabling daily health report...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showSuccess('Daily health report enabled! You\'ll receive a summary at 9 AM.');
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarStartHealthCheck();
+    }
+
+    // Stop health check
+    function stopHealthCheck() {
+      showStatus('Disabling daily health report...', 'loading');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showSuccess('Daily health report disabled.');
+        })
+        .withFailureHandler(function(err) {
+          showError('Error: ' + err.message);
+        })
+        .sidebarStopHealthCheck();
+    }
+
+    // Load jobs on page load
+    loadJobs();
+  </script>
+</body>
+</html>

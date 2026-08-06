@@ -5,6 +5,7 @@
  * Currently supports:
  * - Anthropic Claude (default) - claude-sonnet-4, claude-haiku-3.5, etc.
  * - Google Gemini - gemini-2.0-flash
+ * - Ollama - self-hosted / proxied models (e.g. qwen3:8b)
  *
  * To add a new provider:
  * 1. Create YourProvider.gs with a createYourProvider(apiKey) function
@@ -31,8 +32,10 @@ var LLMFactory = {
         return createAnthropicProvider(settings.ANTHROPIC_API_KEY, model);
       case 'gemini':
         return createGeminiProvider(settings.GEMINI_API_KEY);
+      case 'ollama':
+        return createOllamaProvider(settings.OLLAMA_URL, settings.OLLAMA_API_KEY, settings.OLLAMA_MODEL, settings.OLLAMA_AUTH_HEADER);
       default:
-        throw new Error('Unknown LLM provider: ' + providerName + '. Available: anthropic, gemini');
+        throw new Error('Unknown LLM provider: ' + providerName + '. Available: anthropic, gemini, ollama');
     }
   }
 };

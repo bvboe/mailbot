@@ -125,17 +125,6 @@ function getSheet_(tabName) {
 }
 
 /**
- * Get the config spreadsheet
- * @returns {GoogleAppsScript.Spreadsheet.Spreadsheet}
- */
-function getConfigSpreadsheet() {
-  if (!CONFIG_SHEET_ID) {
-    throw new Error('CONFIG_SHEET_ID not set. Please set it in Script Properties.');
-  }
-  return SpreadsheetApp.openById(CONFIG_SHEET_ID);
-}
-
-/**
  * Test function to verify config loading works
  */
 function testConfig() {
@@ -246,8 +235,13 @@ function setupSettingsTab_(sheet) {
   const settings = [
     ['ANTHROPIC_API_KEY', '', 'Get your API key from https://console.anthropic.com/settings/keys'],
     ['ANTHROPIC_MODEL', 'claude-sonnet-4-20250514', 'Options: claude-3-haiku-20240307, claude-3-5-haiku-20241022, claude-sonnet-4-20250514, claude-opus-4-20250514'],
+    ['GEMINI_API_KEY', '', 'Get your API key from https://aistudio.google.com/app/apikey'],
+    ['OLLAMA_URL', '', 'Ollama endpoint base URL (e.g. https://auto.gomezboe.com). /api/generate is appended automatically'],
+    ['OLLAMA_API_KEY', '', 'Value sent in the auth header (leave blank if the endpoint needs no auth)'],
+    ['OLLAMA_AUTH_HEADER', 'X-Api-Key', 'Name of the auth header carrying OLLAMA_API_KEY (deployment specific)'],
+    ['OLLAMA_MODEL', 'qwen3:8b', 'Ollama model to use (e.g. qwen3:8b, llama3.1:8b)'],
     ['GOOGLE_CHAT_WEBHOOK_URL', '', 'Create a webhook in Google Chat space settings'],
-    ['LLM_PROVIDER', 'anthropic', 'LLM provider to use (anthropic or gemini)'],
+    ['LLM_PROVIDER', 'anthropic', 'LLM provider to use (anthropic, gemini, or ollama)'],
     ['NOTIFIER', 'googlechat', 'Notification service (googlechat)'],
     ['LOG_LEVEL', 'normal', 'Logging verbosity: normal or verbose'],
     ['LABEL_PREFIX', 'MailBot/', 'Prefix for auto-created labels (e.g., MailBot/ or empty for no prefix)']

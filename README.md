@@ -5,7 +5,7 @@ A Google Apps Script bot that monitors Gmail, analyzes emails via LLM (Anthropic
 ## Features
 
 - **Multi-job support**: Configure multiple jobs with different schedules, labels, and prompts
-- **Pluggable LLM providers**: Supports Anthropic Claude (default) and Google Gemini
+- **Pluggable LLM providers**: Supports Anthropic Claude (default), Google Gemini, and Ollama
 - **Pluggable notifiers**: Google Chat webhooks
 - **Flexible scheduling**: Run jobs at intervals or specific times
 - **Conditional notifications**: Only notify when the LLM flags something as important
@@ -69,8 +69,13 @@ Open the Google Sheet and fill in the Settings tab:
 |-----|-------|-------------|
 | ANTHROPIC_API_KEY | your-key | Get from https://console.anthropic.com/settings/keys |
 | ANTHROPIC_MODEL | claude-sonnet-4-20250514 | Model to use |
+| GEMINI_API_KEY | your-key | Get from https://aistudio.google.com/app/apikey |
+| OLLAMA_URL | https://host | Ollama endpoint base URL (`/api/generate` appended automatically) |
+| OLLAMA_API_KEY | your-key | Value sent in the auth header (blank if endpoint needs no auth) |
+| OLLAMA_AUTH_HEADER | X-Api-Key | Name of the auth header carrying the key (deployment specific) |
+| OLLAMA_MODEL | qwen3:8b | Ollama model to use |
 | GOOGLE_CHAT_WEBHOOK_URL | webhook-url | Create in Google Chat space settings |
-| LLM_PROVIDER | anthropic | `anthropic` or `gemini` |
+| LLM_PROVIDER | anthropic | `anthropic`, `gemini`, or `ollama` |
 | NOTIFIER | googlechat | Notification service |
 
 ### 7. Set up Gmail filters
@@ -134,7 +139,8 @@ mailbot/
 │   ├── llm/
 │   │   ├── LLMProvider.gs     # LLM factory and base
 │   │   ├── AnthropicProvider.gs # Anthropic Claude integration
-│   │   └── GeminiProvider.gs  # Google Gemini integration
+│   │   ├── GeminiProvider.gs  # Google Gemini integration
+│   │   └── OllamaProvider.gs  # Ollama integration (custom X-Api-Key auth)
 │   └── notifier/
 │       ├── Notifier.gs        # Notifier factory and base
 │       └── GoogleChatNotifier.gs # Google Chat webhook

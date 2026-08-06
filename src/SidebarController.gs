@@ -232,6 +232,12 @@ function sidebarValidateConfig() {
     if (provider === 'gemini' && !settings.GEMINI_API_KEY) {
       issues.push('GEMINI_API_KEY is not set');
     }
+    if (provider === 'ollama' && !settings.OLLAMA_URL) {
+      issues.push('OLLAMA_URL is not set');
+    }
+    if (provider === 'ollama' && !settings.OLLAMA_MODEL) {
+      issues.push('OLLAMA_MODEL is not set');
+    }
 
     // Check notifier config
     var notifierType = settings.NOTIFIER || 'googlechat';

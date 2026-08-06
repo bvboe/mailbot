@@ -244,7 +244,7 @@ function setupSettingsTab_(sheet) {
     ['SIGNAL_URL', '', 'Signal wrapper endpoint base URL (e.g. https://your-host). /send is appended automatically'],
     ['SIGNAL_API_KEY', '', 'Value sent in the auth header (leave blank if the endpoint needs no auth)'],
     ['SIGNAL_AUTH_HEADER', 'X-Api-Key', 'Name of the auth header carrying SIGNAL_API_KEY (deployment specific)'],
-    ['SIGNAL_RECIPIENT', '', 'Recipient phone number(s), comma-separated (e.g. +17863890621)'],
+    ['SIGNAL_RECIPIENT', '', 'Recipient phone number(s), comma-separated (e.g. +15551234567)'],
     ['LLM_PROVIDER', 'anthropic', 'LLM provider to use (anthropic, gemini, or ollama)'],
     ['NOTIFIER', 'googlechat', 'Notification service (googlechat or signal)'],
     ['LOG_LEVEL', 'normal', 'Logging verbosity: normal or verbose'],

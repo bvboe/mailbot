@@ -18,7 +18,7 @@
  * @param {string} apiKey - Value sent in the auth header (optional if the
  *                           endpoint requires no auth)
  * @param {string} recipient - Recipient(s) to message. Comma-separated for
- *                             multiple (e.g. '+17863890621,+15551234567')
+ *                             multiple (e.g. '+15551234567,+15559876543')
  * @param {string} authHeader - Name of the auth header to send the key in
  *                              (deployment specific, defaults to 'X-Api-Key')
  * @returns {Object} Notifier with send() and sendError() methods

@@ -78,7 +78,7 @@ Open the Google Sheet and fill in the Settings tab:
 | SIGNAL_URL | https://host | Signal wrapper endpoint base URL (`/send` appended automatically) |
 | SIGNAL_API_KEY | your-key | Value sent in the auth header (blank if endpoint needs no auth) |
 | SIGNAL_AUTH_HEADER | X-Api-Key | Name of the auth header carrying the key (deployment specific) |
-| SIGNAL_RECIPIENT | +17863890621 | Recipient phone number(s), comma-separated |
+| SIGNAL_RECIPIENT | +15551234567 | Recipient phone number(s), comma-separated |
 | LLM_PROVIDER | anthropic | `anthropic`, `gemini`, or `ollama` |
 | NOTIFIER | googlechat | `googlechat` or `signal` |
 

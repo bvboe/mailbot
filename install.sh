@@ -15,8 +15,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="$SCRIPT_DIR/.mailbot.conf"
-CLASP_FILE="$SCRIPT_DIR/.clasp.json"
+
+# These can be overridden via environment variables so wrapper scripts
+# (e.g. install-work.sh / install-private.sh) can target different
+# deployment environments without duplicating this script's logic.
+CONFIG_FILE="${MAILBOT_CONF:-$SCRIPT_DIR/.mailbot.conf}"
+CLASP_FILE="${MAILBOT_CLASP:-$SCRIPT_DIR/.clasp.json}"
 
 # Default folder name in Google Drive
 DEFAULT_FOLDER_NAME="MailBot"
@@ -52,7 +56,9 @@ check_clasp() {
 
 # Check clasp authentication
 check_login() {
-    local creds_file="$HOME/.clasprc.json"
+    # Honor clasp's own auth-file env var so wrappers can select a per-env
+    # (e.g. work vs private) Google account. Falls back to the global creds.
+    local creds_file="${clasp_config_auth:-$HOME/.clasprc.json}"
 
     if [[ ! -f "$creds_file" ]]; then
         warn "Clasp credentials not found"
@@ -198,9 +204,13 @@ init_project() {
     info "Creating Apps Script project..."
     cd "$SCRIPT_DIR"
 
+    # `clasp create` treats clasp_config_project as an EXISTING project to read,
+    # so it fails when a wrapper points it at a not-yet-created env file. Run
+    # create without that var (clasp writes the default .clasp.json), then move
+    # the result into this environment's CLASP_FILE below.
     set +e
     local output
-    output=$(eval $clasp_cmd 2>&1)
+    output=$(unset clasp_config_project; eval $clasp_cmd 2>&1)
     local exit_code=$?
     set -e
 
@@ -223,6 +233,14 @@ init_project() {
     fi
 
     echo "$output"
+
+    # clasp writes .clasp.json in the project root; move it into this
+    # environment's slot (no-op when CLASP_FILE is already .clasp.json).
+    local default_clasp="$SCRIPT_DIR/.clasp.json"
+    if [[ "$CLASP_FILE" != "$default_clasp" && -f "$default_clasp" ]]; then
+        mv "$default_clasp" "$CLASP_FILE"
+        info "Saved project config to $CLASP_FILE"
+    fi
 
     if [[ -f "$CLASP_FILE" ]]; then
         success "Apps Script project created!"

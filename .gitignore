@@ -1,8 +1,18 @@
 # Clasp config with script ID (contains project-specific IDs)
 .clasp.json
+.clasp.*.json
+
+# Per-environment clasp auth (OAuth tokens - NEVER commit these)
+.clasprc.json
+.clasprc.*.json
 
 # Local installation config
 .mailbot.conf
+.mailbot.*.conf
+
+# Per-environment deployment wrappers (local only)
+install-work.sh
+install-private.sh
 
 # API keys and secrets - NEVER commit these
 api-key.txt

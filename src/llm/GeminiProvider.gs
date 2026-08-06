@@ -1,5 +1,10 @@
 /**
  * GeminiProvider.gs - Google Gemini LLM implementation
+ *
+ * Returns structured JSON response with:
+ * - summary: Text summary for notifications
+ * - isImportant: Boolean flag for conditional notifications
+ * - emails: Per-email actions (star, labels)
  */
 
 /**
@@ -21,10 +26,19 @@ function createGeminiProvider(apiKey) {
      * Analyze content using Google Gemini
      * @param {string} prompt - The analysis prompt from job config
      * @param {string} content - Formatted email content
-     * @returns {Object} { response: string, isImportant: boolean }
+     * @param {Object} options - Additional options
+     * @param {Array<string>} options.existingLabels - List of existing Gmail labels
+     * @param {boolean} options.enableLabeling - Whether to include labeling suggestions
+     * @param {boolean} options.enableStarring - Whether to include starring suggestions
+     * @returns {Object} { summary: string, isImportant: boolean, emails: Array }
      */
-    analyze: function(prompt, content) {
-      var fullPrompt = buildGeminiPrompt_(prompt, content);
+    analyze: function(prompt, content, options) {
+      options = options || {};
+      var existingLabels = options.existingLabels || [];
+      var enableLabeling = options.enableLabeling !== false;
+      var enableStarring = options.enableStarring !== false;
+
+      var fullPrompt = buildGeminiPrompt_(prompt, content, existingLabels, enableLabeling, enableStarring);
 
       var requestBody = {
         contents: [{
@@ -34,11 +48,11 @@ function createGeminiProvider(apiKey) {
         }],
         generationConfig: {
           temperature: 0.3,
-          maxOutputTokens: 1024
+          maxOutputTokens: 2048
         }
       };
 
-      var options = {
+      var fetchOptions = {
         method: 'post',
         contentType: 'application/json',
         payload: JSON.stringify(requestBody),
@@ -49,7 +63,7 @@ function createGeminiProvider(apiKey) {
       var lastError;
 
       for (var attempt = 0; attempt < maxRetries; attempt++) {
-        var response = UrlFetchApp.fetch(url, options);
+        var response = UrlFetchApp.fetch(url, fetchOptions);
         var responseCode = response.getResponseCode();
         var responseText = response.getContentText();
 
@@ -62,7 +76,7 @@ function createGeminiProvider(apiKey) {
           }
 
           var text = result.candidates[0].content.parts[0].text;
-          return parseGeminiResponse_(text);
+          return parseGeminiStructuredResponse_(text);
         }
 
         // Retry on transient errors (5xx, 429 rate limit)
@@ -87,39 +101,129 @@ function createGeminiProvider(apiKey) {
 }
 
 /**
- * Build the full prompt with system instructions
+ * Build the full prompt with system instructions for Gemini
  * @param {string} userPrompt - The job-specific prompt
  * @param {string} content - Email content
+ * @param {Array<string>} existingLabels - List of existing Gmail labels
+ * @param {boolean} enableLabeling - Whether to include labeling instructions
+ * @param {boolean} enableStarring - Whether to include starring instructions
  * @returns {string}
  */
-function buildGeminiPrompt_(userPrompt, content) {
-  return 'You are an email analysis assistant. Analyze the following emails and provide a summary.\n\n' +
-    'INSTRUCTIONS:\n' + userPrompt + '\n\n' +
-    'IMPORTANT: At the very end of your response, on a new line, include exactly one of these markers:\n' +
-    '- [IMPORTANT: YES] if there are urgent or important items that need attention\n' +
-    '- [IMPORTANT: NO] if this is routine information only\n\n' +
-    'EMAILS TO ANALYZE:\n' + content + '\n\n' +
-    'Please provide your analysis:';
+function buildGeminiPrompt_(userPrompt, content, existingLabels, enableLabeling, enableStarring) {
+  var prompt = 'You are an email analysis assistant. Analyze the following emails and respond with structured JSON.\n\n';
+
+  prompt += 'RESPONSE FORMAT: You must respond with valid JSON only. No other text before or after.\n\n';
+
+  prompt += 'JSON STRUCTURE:\n';
+  prompt += '{\n';
+  prompt += '  "summary": "Brief summary for notification",\n';
+  prompt += '  "isImportant": true/false,\n';
+  prompt += '  "emails": [\n';
+  prompt += '    {\n';
+  prompt += '      "index": 0,\n';
+
+  if (enableStarring) {
+    prompt += '      "star": true/false,\n';
+  }
+
+  if (enableLabeling) {
+    prompt += '      "addLabels": ["Label1", "Label2"]\n';
+  }
+
+  prompt += '    }\n';
+  prompt += '  ]\n';
+  prompt += '}\n\n';
+
+  prompt += 'FIELD GUIDELINES:\n';
+  prompt += '- summary: Concise overview for notification.\n';
+  prompt += '- isImportant: Set to true if ANY email requires immediate attention.\n';
+  prompt += '- emails: One entry per email, using 0-based index.\n';
+
+  if (enableStarring) {
+    prompt += '- star: Set to true for urgent or important emails.\n';
+  }
+
+  if (enableLabeling) {
+    prompt += '- addLabels: Array of labels to apply. Can be empty [].\n';
+    prompt += '- Use hierarchical labels like "Customers/CompanyName" for customer emails.\n';
+    prompt += '- Use "Internal" for internal company emails.\n\n';
+
+    if (existingLabels && existingLabels.length > 0) {
+      var relevantLabels = existingLabels.filter(function(label) {
+        return label.indexOf('INBOX') !== 0 &&
+               label.indexOf('SPAM') !== 0 &&
+               label.indexOf('TRASH') !== 0 &&
+               label.indexOf('DRAFT') !== 0 &&
+               label.indexOf('SENT') !== 0;
+      });
+
+      if (relevantLabels.length > 0) {
+        prompt += 'EXISTING LABELS (prefer these):\n';
+        prompt += relevantLabels.slice(0, 50).join(', ') + '\n\n';
+      }
+    }
+  }
+
+  prompt += 'INSTRUCTIONS:\n' + userPrompt + '\n\n';
+  prompt += 'EMAILS TO ANALYZE:\n' + content + '\n\n';
+  prompt += 'Respond with valid JSON only:';
+
+  return prompt;
 }
 
 /**
- * Parse the LLM response to extract summary and importance flag
+ * Parse the structured JSON response from Gemini
  * @param {string} text - Raw LLM response
- * @returns {Object} { response: string, isImportant: boolean }
+ * @returns {Object} { summary: string, isImportant: boolean, emails: Array }
  */
-function parseGeminiResponse_(text) {
-  // Check for importance marker
-  var isImportant = text.indexOf('[IMPORTANT: YES]') !== -1;
-
-  // Remove the marker from the response
-  var cleanedResponse = text
-    .replace(/\[IMPORTANT: (YES|NO)\]/g, '')
-    .trim();
-
-  return {
-    response: cleanedResponse,
-    isImportant: isImportant
+function parseGeminiStructuredResponse_(text) {
+  var defaultResponse = {
+    summary: '',
+    isImportant: false,
+    emails: []
   };
+
+  try {
+    var jsonText = text.trim();
+
+    // Remove markdown code blocks if present
+    if (jsonText.indexOf('```json') === 0) {
+      jsonText = jsonText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (jsonText.indexOf('```') === 0) {
+      jsonText = jsonText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+
+    jsonText = jsonText.trim();
+
+    var parsed = JSON.parse(jsonText);
+
+    var result = {
+      summary: parsed.summary || '',
+      isImportant: parsed.isImportant === true,
+      emails: []
+    };
+
+    if (parsed.emails && Array.isArray(parsed.emails)) {
+      for (var i = 0; i < parsed.emails.length; i++) {
+        var email = parsed.emails[i];
+        result.emails.push({
+          index: typeof email.index === 'number' ? email.index : i,
+          star: email.star === true,
+          addLabels: Array.isArray(email.addLabels) ? email.addLabels : []
+        });
+      }
+    }
+
+    return result;
+  } catch (e) {
+    console.error('Failed to parse Gemini JSON response: ' + e.message);
+    console.log('Raw response: ' + text.substring(0, 500));
+
+    defaultResponse.summary = text.replace(/```[\s\S]*?```/g, '').trim();
+    defaultResponse.isImportant = text.toLowerCase().indexOf('urgent') !== -1;
+
+    return defaultResponse;
+  }
 }
 
 /**
@@ -142,11 +246,19 @@ function testGeminiProvider() {
     'Subject: Urgent: Project deadline moved\n\n' +
     'The project deadline has been moved up to Friday. Please prioritize.\n';
 
+  var existingLabels = getAllUserLabels();
+
   var result = provider.analyze(
     'Summarize these emails and flag any urgent items.',
-    testContent
+    testContent,
+    {
+      existingLabels: existingLabels,
+      enableLabeling: true,
+      enableStarring: true
+    }
   );
 
-  console.log('Response: ' + result.response);
+  console.log('Summary: ' + result.summary);
   console.log('Is Important: ' + result.isImportant);
+  console.log('Emails: ' + JSON.stringify(result.emails, null, 2));
 }

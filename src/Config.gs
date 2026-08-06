@@ -22,10 +22,12 @@ const JOBS_COLUMNS = {
   SCHEDULE_TYPE: 4,
   SCHEDULE_VALUE: 5,
   NOTIFY_CONDITION: 6,
-  LAST_RUN: 7,
-  LAST_RUN_STATUS: 8,
-  LAST_RUN_EMAIL_COUNT: 9,
-  LAST_RUN_ERROR: 10
+  AUTO_LABEL: 7,
+  AUTO_STAR: 8,
+  LAST_RUN: 9,
+  LAST_RUN_STATUS: 10,
+  LAST_RUN_EMAIL_COUNT: 11,
+  LAST_RUN_ERROR: 12
 };
 
 /**
@@ -72,6 +74,8 @@ function loadJobs() {
       scheduleType: row[JOBS_COLUMNS.SCHEDULE_TYPE],
       scheduleValue: String(row[JOBS_COLUMNS.SCHEDULE_VALUE]),
       notifyCondition: row[JOBS_COLUMNS.NOTIFY_CONDITION],
+      autoLabel: row[JOBS_COLUMNS.AUTO_LABEL] === true || row[JOBS_COLUMNS.AUTO_LABEL] === 'TRUE',
+      autoStar: row[JOBS_COLUMNS.AUTO_STAR] === true || row[JOBS_COLUMNS.AUTO_STAR] === 'TRUE',
       lastRun: row[JOBS_COLUMNS.LAST_RUN],
       lastRunStatus: row[JOBS_COLUMNS.LAST_RUN_STATUS],
       lastRunEmailCount: row[JOBS_COLUMNS.LAST_RUN_EMAIL_COUNT],
@@ -93,7 +97,7 @@ function loadJobs() {
 function updateJobStatus(rowIndex, lastRun, status, emailCount, error) {
   const sheet = getSheet_(JOBS_TAB);
 
-  // Update columns H through K (LastRun, LastRunStatus, LastRunEmailCount, LastRunError)
+  // Update LastRun through LastRunError columns (J through M with new columns)
   const startCol = JOBS_COLUMNS.LAST_RUN + 1; // 1-based
   sheet.getRange(rowIndex, startCol, 1, 4).setValues([
     [lastRun, status, emailCount, error || '']
@@ -245,7 +249,8 @@ function setupSettingsTab_(sheet) {
     ['GOOGLE_CHAT_WEBHOOK_URL', '', 'Create a webhook in Google Chat space settings'],
     ['LLM_PROVIDER', 'anthropic', 'LLM provider to use (anthropic or gemini)'],
     ['NOTIFIER', 'googlechat', 'Notification service (googlechat)'],
-    ['LOG_LEVEL', 'normal', 'Logging verbosity: normal or verbose']
+    ['LOG_LEVEL', 'normal', 'Logging verbosity: normal or verbose'],
+    ['LABEL_PREFIX', 'MailBot/', 'Prefix for auto-created labels (e.g., MailBot/ or empty for no prefix)']
   ];
 
   sheet.getRange(2, 1, settings.length, 3).setValues(settings);
@@ -266,8 +271,8 @@ function setupJobsTab_(sheet) {
   // Headers
   const headers = [
     'JobName', 'Enabled', 'Label', 'Prompt', 'ScheduleType',
-    'ScheduleValue', 'NotifyCondition', 'LastRun', 'LastRunStatus',
-    'LastRunEmailCount', 'LastRunError'
+    'ScheduleValue', 'NotifyCondition', 'AutoLabel', 'AutoStar',
+    'LastRun', 'LastRunStatus', 'LastRunEmailCount', 'LastRunError'
   ];
 
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -283,6 +288,8 @@ function setupJobsTab_(sheet) {
       'interval',
       '5',
       'conditional',
+      true,   // AutoLabel
+      true,   // AutoStar
       '', '', '', ''
     ],
     [
@@ -293,6 +300,8 @@ function setupJobsTab_(sheet) {
       'specific_times',
       '08:00,18:00',
       'always',
+      false,  // AutoLabel
+      false,  // AutoStar
       '', '', '', ''
     ]
   ];
@@ -307,10 +316,12 @@ function setupJobsTab_(sheet) {
   sheet.setColumnWidth(5, 100);  // ScheduleType
   sheet.setColumnWidth(6, 120);  // ScheduleValue
   sheet.setColumnWidth(7, 110);  // NotifyCondition
-  sheet.setColumnWidth(8, 150);  // LastRun
-  sheet.setColumnWidth(9, 100);  // LastRunStatus
-  sheet.setColumnWidth(10, 120); // LastRunEmailCount
-  sheet.setColumnWidth(11, 200); // LastRunError
+  sheet.setColumnWidth(8, 80);   // AutoLabel
+  sheet.setColumnWidth(9, 80);   // AutoStar
+  sheet.setColumnWidth(10, 150); // LastRun
+  sheet.setColumnWidth(11, 100); // LastRunStatus
+  sheet.setColumnWidth(12, 120); // LastRunEmailCount
+  sheet.setColumnWidth(13, 200); // LastRunError
 
   // Add data validation for Enabled column
   const enabledRule = SpreadsheetApp.newDataValidation()
@@ -330,11 +341,25 @@ function setupJobsTab_(sheet) {
     .build();
   sheet.getRange('G2:G100').setDataValidation(notifyConditionRule);
 
+  // Add data validation for AutoLabel column
+  const autoLabelRule = SpreadsheetApp.newDataValidation()
+    .requireCheckbox()
+    .build();
+  sheet.getRange('H2:H100').setDataValidation(autoLabelRule);
+
+  // Add data validation for AutoStar column
+  const autoStarRule = SpreadsheetApp.newDataValidation()
+    .requireCheckbox()
+    .build();
+  sheet.getRange('I2:I100').setDataValidation(autoStarRule);
+
   // Add notes
   sheet.getRange('C1').setNote('Gmail label to monitor. Create matching Gmail filter rules.');
   sheet.getRange('E1').setNote('interval = run every N minutes\nspecific_times = run at specific times');
   sheet.getRange('F1').setNote('For interval: minutes between runs\nFor specific_times: comma-separated HH:MM times');
   sheet.getRange('G1').setNote('always = always notify\nconditional = only if LLM flags as important');
+  sheet.getRange('H1').setNote('Enable LLM-based auto-labeling of emails (e.g., Internal, Customers/Acme)');
+  sheet.getRange('I1').setNote('Enable LLM-based starring of important emails');
 }
 
 /**

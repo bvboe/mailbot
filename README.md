@@ -131,7 +131,6 @@ mailbot/
 │   ├── Logger.gs              # Execution logging to sheet
 │   ├── SidebarController.gs   # Server-side sidebar functions
 │   ├── Sidebar.html           # Sidebar UI
-│   ├── Setup.gs               # (deprecated, see Config.gs)
 │   ├── llm/
 │   │   ├── LLMProvider.gs     # LLM factory and base
 │   │   ├── AnthropicProvider.gs # Anthropic Claude integration

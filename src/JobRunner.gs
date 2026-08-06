@@ -151,13 +151,16 @@ function executeJob(job, settings, options) {
   options = options || {};
   var dryRun = options.dryRun || false;
   var verbose = (settings.LOG_LEVEL === 'verbose');
+  var labelPrefix = settings.LABEL_PREFIX || '';
 
   var result = {
     success: false,
     emailCount: 0,
     summary: '',
     error: '',
-    dryRun: dryRun
+    dryRun: dryRun,
+    starred: 0,
+    labeled: 0
   };
 
   var prefix = dryRun ? '[DRY RUN] ' : '';
@@ -183,7 +186,17 @@ function executeJob(job, settings, options) {
       }
     }
 
-    // Step 2: Format emails and send to LLM
+    // Step 2: Fetch existing labels if auto-labeling is enabled
+    var existingLabels = [];
+    if (job.autoLabel) {
+      console.log(prefix + '[' + job.jobName + '] Fetching existing labels for auto-labeling...');
+      existingLabels = getAllUserLabels();
+      if (verbose) {
+        console.log(prefix + '[' + job.jobName + '] Found ' + existingLabels.length + ' existing labels');
+      }
+    }
+
+    // Step 3: Format emails and send to LLM
     var formattedContent = formatEmailsForLLM(emails);
 
     if (verbose) {
@@ -197,15 +210,29 @@ function executeJob(job, settings, options) {
     );
 
     console.log(prefix + '[' + job.jobName + '] Analyzing with LLM...');
-    var analysis = llmProvider.analyze(job.prompt, formattedContent);
-    result.summary = analysis.response;
+
+    // Pass options to LLM for structured response
+    var llmOptions = {
+      existingLabels: existingLabels,
+      enableLabeling: job.autoLabel === true,
+      enableStarring: job.autoStar === true
+    };
+
+    var analysis = llmProvider.analyze(job.prompt, formattedContent, llmOptions);
+    result.summary = analysis.summary;
 
     if (verbose) {
-      console.log(prefix + '[' + job.jobName + '] LLM response length: ' + analysis.response.length + ' chars');
+      console.log(prefix + '[' + job.jobName + '] LLM summary length: ' + analysis.summary.length + ' chars');
       console.log(prefix + '[' + job.jobName + '] LLM isImportant: ' + analysis.isImportant);
+      console.log(prefix + '[' + job.jobName + '] LLM emails array: ' + JSON.stringify(analysis.emails));
     }
 
-    // Step 3: Decide whether to notify based on condition
+    // Step 4: Process per-email actions (starring and labeling)
+    if (analysis.emails && analysis.emails.length > 0) {
+      result = processEmailActions_(emails, analysis.emails, job, labelPrefix, dryRun, verbose, prefix, result);
+    }
+
+    // Step 5: Decide whether to notify based on condition
     var shouldNotify = false;
 
     if (job.notifyCondition === 'always') {
@@ -217,11 +244,11 @@ function executeJob(job, settings, options) {
       }
     }
 
-    // Step 4: Send notification if needed
+    // Step 6: Send notification if needed
     if (shouldNotify) {
       if (dryRun) {
         console.log(prefix + '[' + job.jobName + '] Would send notification (skipped in dry run)');
-        console.log(prefix + '[' + job.jobName + '] Notification content: ' + analysis.response.substring(0, 200) + '...');
+        console.log(prefix + '[' + job.jobName + '] Notification content: ' + analysis.summary.substring(0, 200) + '...');
       } else {
         var notifier = NotifierFactory.create(
           settings.NOTIFIER || 'googlechat',
@@ -230,11 +257,11 @@ function executeJob(job, settings, options) {
 
         console.log('[' + job.jobName + '] Sending notification...');
         var title = job.jobName + ': ' + emails.length + ' email(s)';
-        notifier.send(title, analysis.response);
+        notifier.send(title, analysis.summary);
       }
     }
 
-    // Step 5: Remove label from processed emails
+    // Step 7: Remove processing label from emails
     if (dryRun) {
       console.log(prefix + '[' + job.jobName + '] Would remove labels from ' + emails.length + ' emails (skipped in dry run)');
     } else {
@@ -244,6 +271,9 @@ function executeJob(job, settings, options) {
 
     result.success = true;
     console.log(prefix + '[' + job.jobName + '] Job completed successfully');
+    if (result.starred > 0 || result.labeled > 0) {
+      console.log(prefix + '[' + job.jobName + '] Starred: ' + result.starred + ', Labeled: ' + result.labeled);
+    }
 
   } catch (e) {
     result.success = false;
@@ -265,6 +295,76 @@ function executeJob(job, settings, options) {
         notifier.sendError('Job: ' + job.jobName, e.message);
       } catch (notifyError) {
         console.error('Failed to send error notification: ' + notifyError.message);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Process per-email actions (starring and labeling) from LLM response
+ * @param {Array} emails - Original email array with threadId
+ * @param {Array} llmEmails - LLM response array with actions per email
+ * @param {Object} job - Job configuration (for autoStar, autoLabel flags)
+ * @param {string} labelPrefix - Prefix for new labels
+ * @param {boolean} dryRun - Whether this is a dry run
+ * @param {boolean} verbose - Whether to log verbose output
+ * @param {string} prefix - Log prefix string
+ * @param {Object} result - Result object to update
+ * @returns {Object} Updated result object
+ */
+function processEmailActions_(emails, llmEmails, job, labelPrefix, dryRun, verbose, prefix, result) {
+  for (var i = 0; i < llmEmails.length; i++) {
+    var llmEmail = llmEmails[i];
+    var emailIndex = llmEmail.index;
+
+    // Validate index
+    if (emailIndex < 0 || emailIndex >= emails.length) {
+      console.log(prefix + 'Warning: Invalid email index ' + emailIndex + ', skipping');
+      continue;
+    }
+
+    var email = emails[emailIndex];
+    var threadId = email.threadId;
+
+    // Process starring
+    if (job.autoStar && llmEmail.star === true) {
+      if (dryRun) {
+        console.log(prefix + 'Would star thread for email: ' + email.subject);
+        result.starred++;
+      } else {
+        if (starThread(threadId)) {
+          result.starred++;
+          if (verbose) {
+            console.log(prefix + 'Starred thread for email: ' + email.subject);
+          }
+        }
+      }
+    }
+
+    // Process labeling
+    if (job.autoLabel && llmEmail.addLabels && llmEmail.addLabels.length > 0) {
+      if (dryRun) {
+        console.log(prefix + 'Would apply labels to email "' + email.subject + '": ' + llmEmail.addLabels.join(', '));
+        result.labeled++;
+      } else {
+        var labelResult = applyLabelsToThread(threadId, llmEmail.addLabels, labelPrefix);
+
+        if (labelResult.applied.length > 0) {
+          result.labeled++;
+          if (verbose) {
+            console.log(prefix + 'Applied labels to "' + email.subject + '": ' + labelResult.applied.join(', '));
+          }
+        }
+
+        if (labelResult.created.length > 0) {
+          console.log(prefix + 'Created new labels: ' + labelResult.created.join(', '));
+        }
+
+        if (labelResult.errors.length > 0) {
+          console.log(prefix + 'Label errors: ' + labelResult.errors.join('; '));
+        }
       }
     }
   }

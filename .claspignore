@@ -1,0 +1,8 @@
+# Only push the Apps Script manifest and the src/ tree.
+# Ignore everything first, then re-include the files clasp should upload.
+# This prevents root-level tooling files (e.g. .eslintrc.js) from being
+# pushed and converted to .gs, which breaks the project at load time.
+**/**
+
+!appsscript.json
+!src/**

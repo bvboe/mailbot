@@ -242,7 +242,7 @@ init_project() {
 
         echo "To create the config sheet:"
         echo ""
-        echo "  1. Select 'createConfigSheet' from the function dropdown"
+        echo "  1. Select 'createConfigSheet' from the function dropdown (defined in Config.gs)"
         echo "  2. Click Run"
         echo "  3. Authorize when prompted"
         echo "  4. Check View → Logs for the Sheet URL"
@@ -308,7 +308,7 @@ setup_sheet() {
     echo ""
     echo "To create the config Sheet:"
     echo ""
-    echo "  1. Select 'createConfigSheet' from the function dropdown"
+    echo "  1. Select 'createConfigSheet' from the function dropdown (defined in Config.gs)"
     echo "  2. Click Run"
     echo "  3. Authorize when prompted"
     echo "  4. Check View → Logs for the Sheet URL"

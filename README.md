@@ -6,7 +6,7 @@ A Google Apps Script bot that monitors Gmail, analyzes emails via LLM (Anthropic
 
 - **Multi-job support**: Configure multiple jobs with different schedules, labels, and prompts
 - **Pluggable LLM providers**: Supports Anthropic Claude (default), Google Gemini, and Ollama
-- **Pluggable notifiers**: Google Chat webhooks
+- **Pluggable notifiers**: Google Chat webhooks and Signal (custom wrapper endpoint)
 - **Flexible scheduling**: Run jobs at intervals or specific times
 - **Conditional notifications**: Only notify when the LLM flags something as important
 - **Sidebar control panel**: Manage jobs, test notifications, and control the scheduler from a sidebar UI
@@ -75,8 +75,12 @@ Open the Google Sheet and fill in the Settings tab:
 | OLLAMA_AUTH_HEADER | X-Api-Key | Name of the auth header carrying the key (deployment specific) |
 | OLLAMA_MODEL | qwen3:8b | Ollama model to use |
 | GOOGLE_CHAT_WEBHOOK_URL | webhook-url | Create in Google Chat space settings |
+| SIGNAL_URL | https://host | Signal wrapper endpoint base URL (`/send` appended automatically) |
+| SIGNAL_API_KEY | your-key | Value sent in the auth header (blank if endpoint needs no auth) |
+| SIGNAL_AUTH_HEADER | X-Api-Key | Name of the auth header carrying the key (deployment specific) |
+| SIGNAL_RECIPIENT | +17863890621 | Recipient phone number(s), comma-separated |
 | LLM_PROVIDER | anthropic | `anthropic`, `gemini`, or `ollama` |
-| NOTIFIER | googlechat | Notification service |
+| NOTIFIER | googlechat | `googlechat` or `signal` |
 
 ### 7. Set up Gmail filters
 
@@ -143,7 +147,8 @@ mailbot/
 │   │   └── OllamaProvider.gs  # Ollama integration (custom X-Api-Key auth)
 │   └── notifier/
 │       ├── Notifier.gs        # Notifier factory and base
-│       └── GoogleChatNotifier.gs # Google Chat webhook
+│       ├── GoogleChatNotifier.gs # Google Chat webhook
+│       └── SignalNotifier.gs  # Signal wrapper (custom X-Api-Key auth)
 ├── appsscript.json            # Apps Script manifest
 ├── install.sh                 # Installation script
 ├── .clasp.json                # Clasp config (generated)

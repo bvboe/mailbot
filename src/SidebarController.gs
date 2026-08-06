@@ -244,6 +244,12 @@ function sidebarValidateConfig() {
     if (notifierType === 'googlechat' && !settings.GOOGLE_CHAT_WEBHOOK_URL) {
       issues.push('GOOGLE_CHAT_WEBHOOK_URL is not set');
     }
+    if (notifierType === 'signal' && !settings.SIGNAL_URL) {
+      issues.push('SIGNAL_URL is not set');
+    }
+    if (notifierType === 'signal' && !settings.SIGNAL_RECIPIENT) {
+      issues.push('SIGNAL_RECIPIENT is not set');
+    }
 
     // Check jobs
     var jobs = loadJobs();

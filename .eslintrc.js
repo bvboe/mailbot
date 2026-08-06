@@ -69,6 +69,8 @@ module.exports = {
     'createOllamaProvider': 'readonly',
     'normalizeOllamaUrl_': 'readonly',
     'createGoogleChatNotifier': 'readonly',
+    'createSignalNotifier': 'readonly',
+    'normalizeSignalUrl_': 'readonly',
     'buildSystemPrompt_': 'readonly',
     'parseStructuredResponse_': 'readonly',
     'buildGeminiPrompt_': 'readonly',

@@ -4,6 +4,7 @@
  * Provides a pluggable architecture for different notification backends.
  * Currently supports:
  * - Google Chat webhooks (default)
+ * - Signal (custom self-hosted wrapper endpoint)
  *
  * To add a new notifier:
  * 1. Create YourNotifier.gs with a createYourNotifier(settings) function
@@ -27,8 +28,10 @@ var NotifierFactory = {
     switch (notifierName.toLowerCase()) {
       case 'googlechat':
         return createGoogleChatNotifier(settings.GOOGLE_CHAT_WEBHOOK_URL);
+      case 'signal':
+        return createSignalNotifier(settings.SIGNAL_URL, settings.SIGNAL_API_KEY, settings.SIGNAL_RECIPIENT, settings.SIGNAL_AUTH_HEADER);
       default:
-        throw new Error('Unknown notifier: ' + notifierName + '. Available: googlechat');
+        throw new Error('Unknown notifier: ' + notifierName + '. Available: googlechat, signal');
     }
   }
 };

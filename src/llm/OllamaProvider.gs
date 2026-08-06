@@ -3,7 +3,7 @@
  *
  * Talks to an Ollama-compatible /api/generate endpoint. Supports a custom
  * authentication header for setups placed behind an auth proxy, e.g.
- * https://auto.gomezboe.com/api/generate. The header name is deployment
+ * https://your-host/api/generate. The header name is deployment
  * specific and defaults to 'X-Api-Key'.
  *
  * Reuses buildSystemPrompt_() and parseStructuredResponse_() from
@@ -19,8 +19,8 @@
 /**
  * Create an Ollama provider instance
  * @param {string} url - Base URL or full /api/generate endpoint
- *                        (e.g. 'https://auto.gomezboe.com' or
- *                        'https://auto.gomezboe.com/api/generate')
+ *                        (e.g. 'https://your-host' or
+ *                        'https://your-host/api/generate')
  * @param {string} apiKey - Value sent in the auth header (optional if the
  *                           endpoint requires no auth)
  * @param {string} model - Model to use (e.g. 'qwen3:8b')

@@ -240,6 +240,7 @@ function setupSettingsTab_(sheet) {
     ['OLLAMA_API_KEY', '', 'Value sent in the auth header (leave blank if the endpoint needs no auth)'],
     ['OLLAMA_AUTH_HEADER', 'X-Api-Key', 'Name of the auth header carrying OLLAMA_API_KEY (deployment specific)'],
     ['OLLAMA_MODEL', 'qwen3:8b', 'Ollama model to use (e.g. qwen3:8b, llama3.1:8b)'],
+    ['OLLAMA_NUM_CTX', '12288', 'Context window (num_ctx). Larger fits more emails but uses more endpoint memory. 12288 is a safe max for an 8B model on an 8GB Jetson'],
     ['GOOGLE_CHAT_WEBHOOK_URL', '', 'Create a webhook in Google Chat space settings'],
     ['SIGNAL_URL', '', 'Signal wrapper endpoint base URL (e.g. https://your-host). /send is appended automatically'],
     ['SIGNAL_API_KEY', '', 'Value sent in the auth header (leave blank if the endpoint needs no auth)'],

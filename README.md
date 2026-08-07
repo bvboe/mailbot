@@ -74,6 +74,7 @@ Open the Google Sheet and fill in the Settings tab:
 | OLLAMA_API_KEY | your-key | Value sent in the auth header (blank if endpoint needs no auth) |
 | OLLAMA_AUTH_HEADER | X-Api-Key | Name of the auth header carrying the key (deployment specific) |
 | OLLAMA_MODEL | qwen3:8b | Ollama model to use |
+| OLLAMA_NUM_CTX | 8192 | Context window; larger fits more emails but uses more endpoint memory |
 | GOOGLE_CHAT_WEBHOOK_URL | webhook-url | Create in Google Chat space settings |
 | SIGNAL_URL | https://host | Signal wrapper endpoint base URL (`/send` appended automatically) |
 | SIGNAL_API_KEY | your-key | Value sent in the auth header (blank if endpoint needs no auth) |

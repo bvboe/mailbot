@@ -135,7 +135,7 @@ function buildGeminiPrompt_(userPrompt, content, existingLabels, enableLabeling,
   prompt += '}\n\n';
 
   prompt += 'FIELD GUIDELINES:\n';
-  prompt += '- summary: Concise overview for notification.\n';
+  prompt += '- summary: Concise overview for notification. Group related emails under short *bold* headings, with brief bullet points beneath each heading (one bullet per email or theme). Keep it short and do NOT repeat any email, heading, or point more than once.\n';
   prompt += '- isImportant: Set to true if ANY email requires immediate attention.\n';
   prompt += '- emails: One entry per email, using 0-based index.\n';
 

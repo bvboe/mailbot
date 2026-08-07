@@ -13,8 +13,16 @@
  * @fileoverview Gmail service layer for email operations
  */
 
-// Maximum body length to include in LLM context
+// Maximum body length to include in LLM context (coarse per-email upper bound)
 const MAX_BODY_LENGTH = 2000;
+
+// Total character budget for all email bodies in a single LLM request. The
+// per-email cap is derived from this and the email count, so the total prompt
+// size stays bounded regardless of how many emails are in the batch.
+const LLM_CHAR_BUDGET = 24000;
+
+// Never trim an individual email body below this many characters.
+const MIN_BODY_CHARS = 300;
 
 /**
  * Fetch emails with a specific label
@@ -44,7 +52,7 @@ function fetchEmailsWithLabel(labelName) {
         from: message.getFrom(),
         to: message.getTo(),
         date: message.getDate(),
-        body: truncateBody_(message.getPlainBody()),
+        body: truncateBody_(bodyText_(message)),
         snippet: thread.getFirstMessageSubject() // Brief preview
       });
     }
@@ -82,14 +90,83 @@ function removeLabelFromEmails(labelName, emails) {
 }
 
 /**
- * Truncate email body to stay within LLM context limits
+ * Get the best text representation of a message body. Prefers the plain-text
+ * part (Gmail renders HTML-only mail down to text for us); falls back to a
+ * crude tag-strip of the HTML part when the plain body is empty.
+ * @param {GoogleAppsScript.Gmail.GmailMessage} message
+ * @returns {string} Body text (HTML tags removed)
+ */
+function bodyText_(message) {
+  var plain = message.getPlainBody();
+  if (plain && plain.trim()) {
+    return plain;
+  }
+
+  // Fallback: HTML-only email with no usable plain part — strip tags crudely.
+  return (message.getBody() || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ');
+}
+
+/**
+ * Remove quoted reply history and signatures from a plain-text body. Operates
+ * line-by-line, so it must run BEFORE any whitespace collapse.
+ * @param {string} body - Plain-text body
+ * @returns {string} Body with quoted history and signature removed
+ */
+function stripQuotedText_(body) {
+  if (!body) return '';
+
+  var lines = body.split(/\r?\n/);
+  var kept = [];
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // Everything from a reply attribution / forwarded header down is history.
+    if (/^\s*On .+wrote:\s*$/.test(line) ||
+        /^\s*-{2,}\s*Original Message\s*-{2,}/i.test(line) ||
+        /^\s*_{5,}\s*$/.test(line) ||
+        /^\s*From:\s.+\bSent:\s/i.test(line)) {
+      break;
+    }
+
+    // Signature delimiter ("-- " on its own line) — drop the rest.
+    if (/^--\s*$/.test(line)) {
+      break;
+    }
+
+    // Individual quoted lines.
+    if (/^\s*>/.test(line)) {
+      continue;
+    }
+
+    kept.push(line);
+  }
+
+  return kept.join('\n');
+}
+
+/**
+ * Clean and truncate an email body to stay within LLM context limits.
+ * Order matters: strip quotes/signatures (line-based) BEFORE collapsing
+ * whitespace, then remove link/boilerplate noise, then apply the char cap.
  * @param {string} body - Full email body
- * @returns {string} Truncated body
+ * @returns {string} Cleaned, truncated body
  */
 function truncateBody_(body) {
   if (!body) return '';
 
-  // Clean up excessive whitespace
+  // 1. Drop quoted reply history and signatures (needs line structure).
+  body = stripQuotedText_(body);
+
+  // 2. Collapse long tracking/unsubscribe URLs to a placeholder. (We avoid
+  //    deleting whole "boilerplate" lines — that risked stripping context the
+  //    LLM needs to judge importance, e.g. security-alert reassurance text.)
+  body = body.replace(/https?:\/\/\S+/g, '[link]');
+
+  // 3. Collapse remaining whitespace.
   body = body.replace(/\s+/g, ' ').trim();
 
   if (body.length <= MAX_BODY_LENGTH) {
@@ -109,14 +186,23 @@ function formatEmailsForLLM(emails) {
     return 'No emails to process.';
   }
 
+  // Divide the total budget across the batch so the overall prompt size stays
+  // bounded no matter how many emails there are (with a per-email floor).
+  const perEmail = Math.max(MIN_BODY_CHARS, Math.floor(LLM_CHAR_BUDGET / emails.length));
+
   const formatted = emails.map((email, index) => {
+    let body = email.body || '';
+    if (body.length > perEmail) {
+      body = body.substring(0, perEmail) + '... [trimmed]';
+    }
+
     return `--- Email ${index + 1} ---
 From: ${email.from}
 To: ${email.to}
 Date: ${email.date}
 Subject: ${email.subject}
 
-${email.body}
+${body}
 `;
   });
 

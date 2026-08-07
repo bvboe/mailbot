@@ -26,9 +26,12 @@
  * @param {string} model - Model to use (e.g. 'qwen3:8b')
  * @param {string} authHeader - Name of the auth header to send the key in
  *                              (deployment specific, defaults to 'X-Api-Key')
+ * @param {number|string} numCtx - Context window size (num_ctx). Larger values
+ *                                 fit more/longer emails but use more memory on
+ *                                 the endpoint. Defaults to 8192.
  * @returns {Object} Provider with analyze() method
  */
-function createOllamaProvider(url, apiKey, model, authHeader) {
+function createOllamaProvider(url, apiKey, model, authHeader, numCtx) {
   if (!url) {
     throw new Error('OLLAMA_URL is required');
   }
@@ -38,6 +41,7 @@ function createOllamaProvider(url, apiKey, model, authHeader) {
 
   var endpoint = normalizeOllamaUrl_(url);
   var headerName = (authHeader && String(authHeader).trim()) || 'X-Api-Key';
+  var contextWindow = parseInt(numCtx, 10) > 0 ? parseInt(numCtx, 10) : 8192;
   var maxRetries = 3;
   var retryDelays = [1000, 2000, 4000]; // Exponential backoff: 1s, 2s, 4s
 
@@ -69,10 +73,21 @@ function createOllamaProvider(url, apiKey, model, authHeader) {
         system: systemPrompt,
         prompt: userMessage,
         stream: false,
-        format: 'json', // Force Ollama to emit valid JSON
+        // Pass a real JSON Schema (not just 'json') so Ollama constrains the
+        // output to our structure. Plain 'json' only guarantees valid syntax,
+        // which lets smaller models emit a schema instead of an instance.
+        format: buildOllamaResponseSchema_(enableLabeling, enableStarring),
         options: {
           temperature: 0.3,
-          num_predict: 2048
+          // num_ctx is the shared input+output budget; num_predict caps output
+          // and comes out of that budget. Larger inboxes need a larger num_ctx.
+          num_ctx: contextWindow,
+          num_predict: 4096,
+          // Discourage repetition-loop degeneration (small models can get
+          // stuck re-listing emails). repeat_last_n widens the look-back so
+          // long-range repeats (whole-list loops) are penalized too.
+          repeat_penalty: 1.3,
+          repeat_last_n: 512
         }
       };
 
@@ -143,6 +158,51 @@ function normalizeOllamaUrl_(url) {
   }
 
   return trimmed + '/api/generate';
+}
+
+/**
+ * Build the JSON Schema Ollama should constrain its response to. This mirrors
+ * exactly what parseStructuredResponse_() expects, so the model returns a
+ * conforming instance rather than valid-but-arbitrary JSON.
+ * @param {boolean} enableLabeling - Include the addLabels field
+ * @param {boolean} enableStarring - Include the star field
+ * @returns {Object} JSON Schema object
+ */
+function buildOllamaResponseSchema_(enableLabeling, enableStarring) {
+  var emailProps = {
+    index: { type: 'integer' }
+  };
+  var emailRequired = ['index'];
+
+  if (enableStarring) {
+    emailProps.star = { type: 'boolean' };
+    emailRequired.push('star');
+  }
+
+  if (enableLabeling) {
+    emailProps.addLabels = {
+      type: 'array',
+      items: { type: 'string' }
+    };
+    emailRequired.push('addLabels');
+  }
+
+  return {
+    type: 'object',
+    properties: {
+      summary: { type: 'string' },
+      isImportant: { type: 'boolean' },
+      emails: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: emailProps,
+          required: emailRequired
+        }
+      }
+    },
+    required: ['summary', 'isImportant', 'emails']
+  };
 }
 
 /**

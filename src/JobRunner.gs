@@ -158,6 +158,8 @@ function executeJob(job, settings, options) {
     emailCount: 0,
     summary: '',
     error: '',
+    warning: '',
+    partial: false,
     dryRun: dryRun,
     starred: 0,
     labeled: 0
@@ -220,6 +222,43 @@ function executeJob(job, settings, options) {
 
     var analysis = llmProvider.analyze(job.prompt, formattedContent, llmOptions);
     result.summary = analysis.summary;
+
+    // Completeness check: models sometimes silently analyze only part of the
+    // batch, or invent emails that weren't sent. Both return valid JSON with no
+    // error, so detect it explicitly by comparing the per-email results against
+    // the emails we actually sent.
+    var completeness = checkAnalysisCompleteness_(emails.length, analysis.emails);
+    result.partial = !completeness.complete;
+    if (!completeness.complete) {
+      var incomplete = completeness.missing.length > 0;
+      var invented = completeness.hallucinated.length > 0;
+
+      var warn = 'Analysis issue: covered ' + completeness.analyzed + ' of ' +
+        emails.length + ' emails';
+      if (incomplete) {
+        warn += '; missing: ' + completeness.missing.join(',');
+      }
+      if (invented) {
+        warn += '; invalid indices: ' + completeness.hallucinated.join(',');
+      }
+      console.warn(prefix + '[' + job.jobName + '] ' + warn);
+      result.warning = warn;
+
+      // Tailor the human-facing note to what actually went wrong: missing
+      // emails => the digest is incomplete; extra/invalid indices => the model
+      // invented content that doesn't correspond to a real email.
+      var note;
+      if (incomplete && invented) {
+        note = 'This digest may be incomplete and may reference emails that were not sent.';
+      } else if (incomplete) {
+        note = 'This digest may be incomplete.';
+      } else {
+        note = 'The model referenced email(s) that were not sent, so some details may be invented.';
+      }
+
+      analysis.summary = analysis.summary + '\n\n⚠️ _' + warn + '. ' + note + '_';
+      result.summary = analysis.summary;
+    }
 
     if (verbose) {
       console.log(prefix + '[' + job.jobName + '] LLM summary length: ' + analysis.summary.length + ' chars');
@@ -300,6 +339,44 @@ function executeJob(job, settings, options) {
   }
 
   return result;
+}
+
+/**
+ * Detect a partial or hallucinated analysis by comparing the LLM's per-email
+ * results against the emails we actually sent. Both failure modes otherwise
+ * pass silently (valid JSON, done_reason=stop), so we surface them.
+ * @param {number} emailCount - Number of emails sent to the LLM
+ * @param {Array} llmEmails - analysis.emails array (each with an .index)
+ * @returns {Object} { complete, analyzed, missing: [], hallucinated: [] }
+ */
+function checkAnalysisCompleteness_(emailCount, llmEmails) {
+  var seen = {};
+  var hallucinated = [];
+  var list = llmEmails || [];
+
+  for (var i = 0; i < list.length; i++) {
+    var idx = list[i] ? list[i].index : undefined;
+    // Out-of-range, non-numeric, or duplicate index = invented/unreliable.
+    if (typeof idx !== 'number' || idx < 0 || idx >= emailCount || seen[idx]) {
+      hallucinated.push(idx);
+    } else {
+      seen[idx] = true;
+    }
+  }
+
+  var missing = [];
+  for (var j = 0; j < emailCount; j++) {
+    if (!seen[j]) {
+      missing.push(j);
+    }
+  }
+
+  return {
+    complete: missing.length === 0 && hallucinated.length === 0,
+    analyzed: Object.keys(seen).length,
+    missing: missing,
+    hallucinated: hallucinated
+  };
 }
 
 /**

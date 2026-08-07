@@ -33,7 +33,7 @@ var LLMFactory = {
       case 'gemini':
         return createGeminiProvider(settings.GEMINI_API_KEY);
       case 'ollama':
-        return createOllamaProvider(settings.OLLAMA_URL, settings.OLLAMA_API_KEY, settings.OLLAMA_MODEL, settings.OLLAMA_AUTH_HEADER);
+        return createOllamaProvider(settings.OLLAMA_URL, settings.OLLAMA_API_KEY, settings.OLLAMA_MODEL, settings.OLLAMA_AUTH_HEADER, settings.OLLAMA_NUM_CTX);
       default:
         throw new Error('Unknown LLM provider: ' + providerName + '. Available: anthropic, gemini, ollama');
     }

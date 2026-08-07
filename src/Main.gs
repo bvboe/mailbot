@@ -47,16 +47,16 @@ function runJobs() {
         now,
         result.success ? 'success' : 'error',
         result.emailCount,
-        result.error
+        result.error || result.warning
       );
 
-      // Log execution
+      // Log execution (surface partial-analysis warnings even on success)
       logExecution(
         job.jobName,
         result.success ? 'success' : 'error',
         result.emailCount,
         result.summary,
-        result.error
+        result.error || result.warning
       );
 
       if (result.success) {
@@ -111,16 +111,16 @@ function runAllJobsNow() {
       now,
       result.success ? 'success' : 'error',
       result.emailCount,
-      result.error
+      result.error || result.warning
     );
 
-    // Log execution
+    // Log execution (surface partial-analysis warnings even on success)
     logExecution(
       job.jobName,
       result.success ? 'success' : 'error',
       result.emailCount,
       result.summary,
-      result.error
+      result.error || result.warning
     );
 
     console.log(`Job ${job.jobName} result:`, result.success ? 'success' : 'failed');

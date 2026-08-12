@@ -221,13 +221,28 @@ function executeJob(job, settings, options) {
     };
 
     var analysis = llmProvider.analyze(job.prompt, formattedContent, llmOptions);
-    result.summary = analysis.summary;
 
     // Completeness check: models sometimes silently analyze only part of the
     // batch, or invent emails that weren't sent. Both return valid JSON with no
     // error, so detect it explicitly by comparing the per-email results against
     // the emails we actually sent.
     var completeness = checkAnalysisCompleteness_(emails.length, analysis.emails);
+
+    // Retry once on an incomplete/invented analysis - these failures (partial
+    // coverage, repetition-loop degeneration) usually don't recur on a fresh
+    // generation. Keep whichever attempt covered more of the batch.
+    if (!completeness.complete) {
+      console.warn(prefix + '[' + job.jobName + '] Analysis incomplete (covered ' +
+        completeness.analyzed + '/' + emails.length + '), retrying once...');
+      var retryAnalysis = llmProvider.analyze(job.prompt, formattedContent, llmOptions);
+      var retryCompleteness = checkAnalysisCompleteness_(emails.length, retryAnalysis.emails);
+      if (retryCompleteness.complete || retryCompleteness.analyzed > completeness.analyzed) {
+        analysis = retryAnalysis;
+        completeness = retryCompleteness;
+      }
+    }
+
+    result.summary = analysis.summary;
     result.partial = !completeness.complete;
     if (!completeness.complete) {
       var incomplete = completeness.missing.length > 0;
@@ -327,11 +342,11 @@ function executeJob(job, settings, options) {
     if (!dryRun) {
       try {
         var settings_ = loadSettings();
-        var notifier = NotifierFactory.create(
+        var errorNotifier = NotifierFactory.create(
           settings_.NOTIFIER || 'googlechat',
           settings_
         );
-        notifier.sendError('Job: ' + job.jobName, e.message);
+        errorNotifier.sendError('Job: ' + job.jobName, e.message);
       } catch (notifyError) {
         console.error('Failed to send error notification: ' + notifyError.message);
       }

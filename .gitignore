@@ -1,3 +1,5 @@
+map-reduce-test
+
 # Clasp config with script ID (contains project-specific IDs)
 .clasp.json
 .clasp.*.json

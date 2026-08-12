@@ -231,9 +231,19 @@ function getOrCreateLabel(labelName) {
  */
 function getAllUserLabels() {
   var labels = GmailApp.getUserLabels();
-  return labels.map(function(label) {
-    return label.getName();
-  });
+  var names = [];
+  for (var i = 0; i < labels.length; i++) {
+    try {
+      names.push(labels[i].getName());
+    } catch (e) {
+      // GmailApp.getUserLabels() can hand back a stale/unresolvable label
+      // handle ("Could not locate target object..."), typically transient or
+      // a label that changed mid-run. Skip it rather than aborting the whole
+      // job - this list is only a hint to the LLM.
+      console.warn('Skipping unreadable label handle: ' + e.message);
+    }
+  }
+  return names;
 }
 
 /**

@@ -201,11 +201,34 @@ The `LastRun*` columns are written by the bot; leave them blank.
 
 ### Compression levels
 
-| Level | Behavior | Use for |
-|-------|----------|---------|
-| `none` | Full bodies, untouched | Large-context models (e.g. Anthropic 1M) |
-| `medium` | Collapse whitespace + per-email char cap | General default |
-| `high` | Strip quoted replies/signatures + collapse tracking URLs to `[link]` + per-batch budget | Small/self-hosted models, large batches |
+Output size is a strict ladder: **`none` ≥ `medium` ≥ `high`** (a higher level never produces a larger payload than a lower one). Blank defaults to `medium`.
+
+| Aspect | `none` | `medium` | `high` |
+|---|---|---|---|
+| HTML tags / comments / entities stripped | ❌ | ✅ | ✅ |
+| Whitespace collapsed | ❌ | ✅ | ✅ |
+| Quoted replies + signatures stripped | ❌ | ❌ kept | ✅ stripped |
+| URLs collapsed to `[link]` | ❌ | ⚠️ long only (> 100 chars) | ✅ all |
+| Per-email char cap | none (raw) | fixed 2,000 | `min(2000, 24000 ÷ emailCount)`, floor 300 |
+| Total prompt bound | none | grows with count (2k × N) | bounded to ~24k across the batch |
+| Relative output size | largest | middle | smallest |
+| Best for | big-context models (Anthropic 1M) | per-email / map-reduce webhook | small/self-hosted models, large batches |
+
+Per-email cap by batch size:
+
+| emails in batch | `medium` cap | `high` cap |
+|---|---|---|
+| 1 | 2,000 | 2,000 |
+| 12 | 2,000 | 2,000 |
+| 20 | 2,000 | 1,200 |
+| 50 | 2,000 | 480 |
+| 100+ | 2,000 | 300 (floor) |
+
+Mental model:
+- **`medium`** = *clean but faithful* — cleans HTML/whitespace, keeps quotes and short URLs (collapses long tracking URLs > 100 chars), caps each email at 2k; total scales with the number of emails.
+- **`high`** = *medium plus aggressive slimming* — also strips quoted replies/signatures and collapses **all** URLs, and hard-bounds the whole batch to ~24k. Always ≤ `medium`.
+
+The tunable constants (`MAX_BODY_LENGTH`, `LLM_CHAR_BUDGET`, `MIN_BODY_CHARS`) live at the top of `src/GmailService.gs`.
 
 ### BatchSize
 

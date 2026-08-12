@@ -410,7 +410,7 @@ function setupJobsTab_(sheet) {
   sheet.getRange('G1').setNote('always = always notify\nconditional = only if LLM flags as important');
   sheet.getRange('H1').setNote('Enable LLM-based auto-labeling of emails (e.g., Internal, Customers/Acme)');
   sheet.getRange('I1').setNote('Enable LLM-based starring of important emails');
-  sheet.getRange('J1').setNote('Body compression before sending to the LLM:\nnone = full bodies (big-context models)\nmedium = whitespace-collapse + per-email cap\nhigh = strip quotes/URLs + per-batch budget (small models / big batches)\nBlank defaults to medium.');
+  sheet.getRange('J1').setNote('Body compression before sending to the LLM. Size ladder: none >= medium >= high.\nnone = full bodies, untouched (big-context models)\nmedium = clean HTML/whitespace, keep quotes & short URLs (collapse long tracking URLs), 2000 chars/email\nhigh = medium PLUS strip quoted replies + collapse ALL URLs, tighter cap (small models)\nBlank defaults to medium.');
   sheet.getRange('K1').setNote('Max emails processed per run.\nBlank or 0 = no limit.\n>0 = cap the batch (e.g. 1 for predictable urgent runs on small models). The remainder keeps its label and is processed on the next run.');
   sheet.getRange('L1').setNote('Optional. If set, MailBot POSTs the batch to this URL instead of the configured LLM (fire-and-forget; expects a 2xx ack). Auth via WEBHOOK_API_KEY / WEBHOOK_AUTH_HEADER in Settings.');
 }

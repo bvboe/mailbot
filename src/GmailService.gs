@@ -24,6 +24,10 @@ const LLM_CHAR_BUDGET = 24000;
 // Never trim an individual email body below this many characters.
 const MIN_BODY_CHARS = 300;
 
+// URLs longer than this are collapsed to [link] (medium). Short, likely-useful
+// URLs (product links, calendar links) are kept; long tracking/UTM URLs aren't.
+const MAX_URL_LENGTH = 100;
+
 /**
  * Fetch emails with a specific label
  * @param {string} labelName - Full label name (e.g., "MailBot/Urgent")
@@ -161,11 +165,14 @@ function normalizeCompression_(level) {
 }
 
 /**
- * Compress an email body according to the job's compression level:
- *   none   - raw body, untouched
- *   medium - collapse whitespace, cap each body at perEmailCap
- *   high   - strip quotes/signatures + collapse tracking URLs to [link] +
- *            collapse whitespace, capped at perEmailCap
+ * Compress an email body according to the job's compression level. Output size
+ * is a strict ladder: none >= medium >= high.
+ *   none   - raw body, untouched (largest)
+ *   medium - HTML/entity cleanup + collapse whitespace + collapse over-long
+ *            URLs (> MAX_URL_LENGTH) to [link]; keeps quoted replies and short
+ *            URLs; 2000-char/email cap
+ *   high   - everything medium does, PLUS strips quoted replies/signatures and
+ *            collapses ALL URLs to [link], with a tighter cap (smallest)
  * @param {string} body - Raw body text
  * @param {string} level - normalized level ('none' | 'medium' | 'high')
  * @param {number} perEmailCap - Max chars (0 = no cap)
@@ -185,6 +192,23 @@ function compressBody_(body, level, perEmailCap) {
     body = body.replace(/https?:\/\/\S+/g, '[link]');
   }
 
+  // HTML/entity cleanup (medium + high). Some senders stuff HTML markup, MSO
+  // conditional comments, and zero-width preheader padding into the text/plain
+  // part, which getPlainBody() returns verbatim. Strip it BEFORE the char cap
+  // so the budget is spent on real content, not markup noise.
+  body = body.replace(/<!--[\s\S]*?-->/g, ' ');             // comments incl. <!--[if mso]>
+  body = body.replace(/<[^>]+>/g, ' ');                      // HTML tags
+  body = body.replace(/&(zwnj|zwj|nbsp);/gi, ' ');           // common padding entities
+  body = body.replace(/[\u200B-\u200D\u2060\uFEFF]/g, ''); // zero-width chars
+  body = body.replace(/\u034F/g, '');                     // combining grapheme joiner
+
+  // Collapse over-long URLs to [link] so giant tracking/UTM links don't eat the
+  // char budget. Short URLs (product/calendar links) are kept. No-op for 'high'
+  // (it already collapsed every URL above).
+  body = body.replace(/https?:\/\/\S+/g, function(url) {
+    return url.length > MAX_URL_LENGTH ? '[link]' : url;
+  });
+
   // Both medium and high collapse whitespace.
   body = body.replace(/\s+/g, ' ').trim();
 
@@ -196,10 +220,13 @@ function compressBody_(body, level, perEmailCap) {
 }
 
 /**
- * Per-email character cap for a compression level:
+ * Per-email character cap for a compression level. The levels form a strict
+ * size ladder: none >= medium >= high (a higher level never produces a larger
+ * body than a lower one).
  *   none   -> 0 (no cap, full bodies)
  *   medium -> fixed MAX_BODY_LENGTH per email
- *   high   -> total budget divided across the batch (with a floor)
+ *   high   -> total budget (LLM_CHAR_BUDGET) divided across the batch, but
+ *             never more than medium's cap and never below MIN_BODY_CHARS
  * @param {string} level - normalized level
  * @param {number} count - number of emails in the batch
  * @returns {number}
@@ -209,7 +236,11 @@ function perEmailCap_(level, count) {
     return MAX_BODY_LENGTH;
   }
   if (level === 'high') {
-    return Math.max(MIN_BODY_CHARS, Math.floor(LLM_CHAR_BUDGET / Math.max(1, count)));
+    // Divide the batch budget across emails, but clamp to [MIN_BODY_CHARS,
+    // MAX_BODY_LENGTH] so 'high' is always <= 'medium' per email (small batches
+    // used to make the budget/count value exceed medium's fixed cap).
+    var budgetShare = Math.floor(LLM_CHAR_BUDGET / Math.max(1, count));
+    return Math.max(MIN_BODY_CHARS, Math.min(MAX_BODY_LENGTH, budgetShare));
   }
   return 0;
 }

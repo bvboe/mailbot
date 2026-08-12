@@ -52,7 +52,9 @@ function fetchEmailsWithLabel(labelName) {
         from: message.getFrom(),
         to: message.getTo(),
         date: message.getDate(),
-        body: truncateBody_(bodyText_(message)),
+        // Store the raw body; compression is applied per-job at format time
+        // (so a 'none' compression setting can send full bodies).
+        body: bodyText_(message),
         snippet: thread.getFirstMessageSubject() // Brief preview
       });
     }
@@ -149,52 +151,105 @@ function stripQuotedText_(body) {
 }
 
 /**
- * Clean and truncate an email body to stay within LLM context limits.
- * Order matters: strip quotes/signatures (line-based) BEFORE collapsing
- * whitespace, then remove link/boilerplate noise, then apply the char cap.
- * @param {string} body - Full email body
- * @returns {string} Cleaned, truncated body
+ * Normalize a job's compression setting to a known level (default 'medium').
+ * @param {string} level
+ * @returns {string} 'none' | 'medium' | 'high'
  */
-function truncateBody_(body) {
-  if (!body) return '';
-
-  // 1. Drop quoted reply history and signatures (needs line structure).
-  body = stripQuotedText_(body);
-
-  // 2. Collapse long tracking/unsubscribe URLs to a placeholder. (We avoid
-  //    deleting whole "boilerplate" lines — that risked stripping context the
-  //    LLM needs to judge importance, e.g. security-alert reassurance text.)
-  body = body.replace(/https?:\/\/\S+/g, '[link]');
-
-  // 3. Collapse remaining whitespace.
-  body = body.replace(/\s+/g, ' ').trim();
-
-  if (body.length <= MAX_BODY_LENGTH) {
-    return body;
-  }
-
-  return body.substring(0, MAX_BODY_LENGTH) + '... [truncated]';
+function normalizeCompression_(level) {
+  const l = String(level || '').trim().toLowerCase();
+  return (l === 'none' || l === 'medium' || l === 'high') ? l : 'medium';
 }
 
 /**
- * Format emails into a text block for LLM processing
+ * Compress an email body according to the job's compression level:
+ *   none   - raw body, untouched
+ *   medium - collapse whitespace, cap each body at perEmailCap
+ *   high   - strip quotes/signatures + collapse tracking URLs to [link] +
+ *            collapse whitespace, capped at perEmailCap
+ * @param {string} body - Raw body text
+ * @param {string} level - normalized level ('none' | 'medium' | 'high')
+ * @param {number} perEmailCap - Max chars (0 = no cap)
+ * @returns {string}
+ */
+function compressBody_(body, level, perEmailCap) {
+  body = body || '';
+
+  if (level === 'none') {
+    return body.trim();
+  }
+
+  if (level === 'high') {
+    // Drop quoted history/signatures (needs line structure), then collapse
+    // long tracking/unsubscribe URLs to a placeholder.
+    body = stripQuotedText_(body);
+    body = body.replace(/https?:\/\/\S+/g, '[link]');
+  }
+
+  // Both medium and high collapse whitespace.
+  body = body.replace(/\s+/g, ' ').trim();
+
+  if (perEmailCap > 0 && body.length > perEmailCap) {
+    body = body.substring(0, perEmailCap) + '... [trimmed]';
+  }
+
+  return body;
+}
+
+/**
+ * Per-email character cap for a compression level:
+ *   none   -> 0 (no cap, full bodies)
+ *   medium -> fixed MAX_BODY_LENGTH per email
+ *   high   -> total budget divided across the batch (with a floor)
+ * @param {string} level - normalized level
+ * @param {number} count - number of emails in the batch
+ * @returns {number}
+ */
+function perEmailCap_(level, count) {
+  if (level === 'medium') {
+    return MAX_BODY_LENGTH;
+  }
+  if (level === 'high') {
+    return Math.max(MIN_BODY_CHARS, Math.floor(LLM_CHAR_BUDGET / Math.max(1, count)));
+  }
+  return 0;
+}
+
+/**
+ * Structured, compression-aware email records for a webhook payload.
+ * @param {Array<Object>} emails - Array of email objects (raw body)
+ * @param {string} compression - Per-job compression level
+ * @returns {Array<Object>} [{ id, threadId, from, to, date, subject, body }]
+ */
+function compressedEmails(emails, compression) {
+  const level = normalizeCompression_(compression);
+  const cap = perEmailCap_(level, (emails || []).length);
+  return (emails || []).map((e) => ({
+    id: e.id,
+    threadId: e.threadId,
+    from: e.from,
+    to: e.to,
+    date: e.date,
+    subject: e.subject,
+    body: compressBody_(e.body, level, cap)
+  }));
+}
+
+/**
+ * Format emails into a text block for LLM processing.
  * @param {Array<Object>} emails - Array of email objects
+ * @param {string} compression - Per-job compression level ('none'|'medium'|'high')
  * @returns {string} Formatted text
  */
-function formatEmailsForLLM(emails) {
-  if (emails.length === 0) {
+function formatEmailsForLLM(emails, compression) {
+  if (!emails || emails.length === 0) {
     return 'No emails to process.';
   }
 
-  // Divide the total budget across the batch so the overall prompt size stays
-  // bounded no matter how many emails there are (with a per-email floor).
-  const perEmail = Math.max(MIN_BODY_CHARS, Math.floor(LLM_CHAR_BUDGET / emails.length));
+  const level = normalizeCompression_(compression);
+  const perEmailCap = perEmailCap_(level, emails.length);
 
   const formatted = emails.map((email, index) => {
-    let body = email.body || '';
-    if (body.length > perEmail) {
-      body = body.substring(0, perEmail) + '... [trimmed]';
-    }
+    const body = compressBody_(email.body, level, perEmailCap);
 
     return `--- Email ${index + 1} ---
 From: ${email.from}

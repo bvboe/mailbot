@@ -140,7 +140,7 @@ function buildSystemPrompt_(existingLabels, enableLabeling, enableStarring) {
   prompt += '}\n\n';
 
   prompt += 'FIELD GUIDELINES:\n';
-  prompt += '- summary: Concise overview for notification. Group related emails under short *bold* headings, with brief bullet points beneath each heading (one bullet per email or theme). Keep it short and do NOT repeat any email, heading, or point more than once.\n';
+  prompt += '- summary: Concise overview for notification. Group related emails under short *bold* headings, with brief bullet points beneath each heading (one bullet per email or theme). Keep it short and do NOT repeat any email, heading, or point more than once. This summary is shown directly to the user, so refer to each email by its sender and/or subject - NEVER by its position number ("Email 1", "Email 2") or index; those labels are internal only.\n';
   prompt += '- isImportant: Set to true if ANY email requires immediate attention.\n';
   prompt += '- emails: One entry per email, using 0-based index matching "Email 1" = index 0, "Email 2" = index 1, etc.\n';
 

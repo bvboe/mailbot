@@ -65,10 +65,14 @@ function installSidebarMenu() {
   // Create an installable onOpen trigger for the spreadsheet
   var triggers = ScriptApp.getProjectTriggers();
 
-  // Check if trigger already exists
+  // Check if a trigger already exists FOR THIS SPREADSHEET specifically.
+  // (A project-wide check would wrongly skip installation whenever an onOpen
+  // trigger from a *different* config sheet already exists, leaving the new
+  // sheet without its "📧 MailBot" menu.)
   var hasOnOpenTrigger = triggers.some(function(t) {
     return t.getHandlerFunction() === 'onOpen' &&
-           t.getEventType() === ScriptApp.EventType.ON_OPEN;
+           t.getEventType() === ScriptApp.EventType.ON_OPEN &&
+           t.getTriggerSourceId() === sheetId;
   });
 
   if (!hasOnOpenTrigger) {

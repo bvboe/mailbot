@@ -171,156 +171,59 @@ function executeJob(job, settings, options) {
     // Step 1: Fetch emails with the job's label
     console.log(prefix + '[' + job.jobName + '] Fetching emails with label: ' + job.label);
     var emails = fetchEmailsWithLabel(job.label);
-    result.emailCount = emails.length;
 
     if (emails.length === 0) {
       console.log(prefix + '[' + job.jobName + '] No emails found');
       result.success = true;
       result.summary = 'No emails to process';
+      result.emailCount = 0;
       return result;
     }
 
-    console.log(prefix + '[' + job.jobName + '] Found ' + emails.length + ' emails');
+    // Drain the whole backlog. BatchSize caps how many emails go to the LLM (or
+    // webhook) in a SINGLE call (0/blank = all at once); we loop over chunks
+    // until every labeled email is processed. Each chunk is an independent
+    // analyze -> act -> notify -> unlabel cycle, so already-processed chunks are
+    // durable even if a later chunk fails (its emails keep their label and are
+    // retried next run).
+    var chunkSize = job.batchSize > 0 ? job.batchSize : emails.length;
+    var batchCount = Math.ceil(emails.length / chunkSize);
+    console.log(prefix + '[' + job.jobName + '] Found ' + emails.length +
+      ' emails; processing in ' + batchCount + ' batch(es) of up to ' + chunkSize);
 
-    if (verbose) {
-      for (var i = 0; i < emails.length; i++) {
-        console.log(prefix + '[' + job.jobName + '] Email ' + (i + 1) + ': ' + emails[i].subject + ' (from: ' + emails[i].from + ')');
+    var summaries = [];
+    var warnings = [];
+    for (var start = 0; start < emails.length; start += chunkSize) {
+      var chunk = emails.slice(start, start + chunkSize);
+      if (batchCount > 1) {
+        console.log(prefix + '[' + job.jobName + '] Batch ' +
+          (Math.floor(start / chunkSize) + 1) + '/' + batchCount + ': emails ' +
+          (start + 1) + '-' + (start + chunk.length));
+      }
+
+      var batch = processEmailBatch_(chunk, job, settings, dryRun, verbose, labelPrefix, prefix);
+
+      // Accumulate incrementally so that if a LATER chunk throws, the status
+      // logged for this run still reflects the chunks that already succeeded
+      // (their labels are gone, so they won't be reprocessed).
+      result.emailCount += chunk.length;
+      result.starred += batch.starred;
+      result.labeled += batch.labeled;
+      if (batch.summary) {
+        summaries.push(batch.summary);
+        result.summary = summaries.join('\n\n---\n\n');
+      }
+      if (batch.warning) {
+        warnings.push(batch.warning);
+        result.warning = warnings.join(' | ');
+      }
+      if (batch.partial) {
+        result.partial = true;
       }
     }
 
-    // Step 2: Fetch existing labels if auto-labeling is enabled
-    var existingLabels = [];
-    if (job.autoLabel) {
-      console.log(prefix + '[' + job.jobName + '] Fetching existing labels for auto-labeling...');
-      existingLabels = getAllUserLabels();
-      if (verbose) {
-        console.log(prefix + '[' + job.jobName + '] Found ' + existingLabels.length + ' existing labels');
-      }
-    }
-
-    // Step 3: Format emails and send to LLM
-    var formattedContent = formatEmailsForLLM(emails);
-
-    if (verbose) {
-      console.log(prefix + '[' + job.jobName + '] Formatted content length: ' + formattedContent.length + ' chars');
-      console.log(prefix + '[' + job.jobName + '] Using prompt: ' + job.prompt.substring(0, 100) + '...');
-    }
-
-    var llmProvider = LLMFactory.create(
-      settings.LLM_PROVIDER || 'anthropic',
-      settings
-    );
-
-    console.log(prefix + '[' + job.jobName + '] Analyzing with LLM...');
-
-    // Pass options to LLM for structured response
-    var llmOptions = {
-      existingLabels: existingLabels,
-      enableLabeling: job.autoLabel === true,
-      enableStarring: job.autoStar === true
-    };
-
-    var analysis = llmProvider.analyze(job.prompt, formattedContent, llmOptions);
-
-    // Completeness check: models sometimes silently analyze only part of the
-    // batch, or invent emails that weren't sent. Both return valid JSON with no
-    // error, so detect it explicitly by comparing the per-email results against
-    // the emails we actually sent.
-    var completeness = checkAnalysisCompleteness_(emails.length, analysis.emails);
-
-    // Retry once on an incomplete/invented analysis - these failures (partial
-    // coverage, repetition-loop degeneration) usually don't recur on a fresh
-    // generation. Keep whichever attempt covered more of the batch.
-    if (!completeness.complete) {
-      console.warn(prefix + '[' + job.jobName + '] Analysis incomplete (covered ' +
-        completeness.analyzed + '/' + emails.length + '), retrying once...');
-      var retryAnalysis = llmProvider.analyze(job.prompt, formattedContent, llmOptions);
-      var retryCompleteness = checkAnalysisCompleteness_(emails.length, retryAnalysis.emails);
-      if (retryCompleteness.complete || retryCompleteness.analyzed > completeness.analyzed) {
-        analysis = retryAnalysis;
-        completeness = retryCompleteness;
-      }
-    }
-
-    result.summary = analysis.summary;
-    result.partial = !completeness.complete;
-    if (!completeness.complete) {
-      var incomplete = completeness.missing.length > 0;
-      var invented = completeness.hallucinated.length > 0;
-
-      var warn = 'Analysis issue: covered ' + completeness.analyzed + ' of ' +
-        emails.length + ' emails';
-      if (incomplete) {
-        warn += '; missing: ' + completeness.missing.join(',');
-      }
-      if (invented) {
-        warn += '; invalid indices: ' + completeness.hallucinated.join(',');
-      }
-      console.warn(prefix + '[' + job.jobName + '] ' + warn);
-      result.warning = warn;
-
-      // Tailor the human-facing note to what actually went wrong: missing
-      // emails => the digest is incomplete; extra/invalid indices => the model
-      // invented content that doesn't correspond to a real email.
-      var note;
-      if (incomplete && invented) {
-        note = 'This digest may be incomplete and may reference emails that were not sent.';
-      } else if (incomplete) {
-        note = 'This digest may be incomplete.';
-      } else {
-        note = 'The model referenced email(s) that were not sent, so some details may be invented.';
-      }
-
-      analysis.summary = analysis.summary + '\n\n⚠️ _' + warn + '. ' + note + '_';
-      result.summary = analysis.summary;
-    }
-
-    if (verbose) {
-      console.log(prefix + '[' + job.jobName + '] LLM summary length: ' + analysis.summary.length + ' chars');
-      console.log(prefix + '[' + job.jobName + '] LLM isImportant: ' + analysis.isImportant);
-      console.log(prefix + '[' + job.jobName + '] LLM emails array: ' + JSON.stringify(analysis.emails));
-    }
-
-    // Step 4: Process per-email actions (starring and labeling)
-    if (analysis.emails && analysis.emails.length > 0) {
-      result = processEmailActions_(emails, analysis.emails, job, labelPrefix, dryRun, verbose, prefix, result);
-    }
-
-    // Step 5: Decide whether to notify based on condition
-    var shouldNotify = false;
-
-    if (job.notifyCondition === 'always') {
-      shouldNotify = true;
-    } else if (job.notifyCondition === 'conditional') {
-      shouldNotify = analysis.isImportant;
-      if (!shouldNotify) {
-        console.log(prefix + '[' + job.jobName + '] LLM says not important, skipping notification');
-      }
-    }
-
-    // Step 6: Send notification if needed
-    if (shouldNotify) {
-      if (dryRun) {
-        console.log(prefix + '[' + job.jobName + '] Would send notification (skipped in dry run)');
-        console.log(prefix + '[' + job.jobName + '] Notification content: ' + analysis.summary.substring(0, 200) + '...');
-      } else {
-        var notifier = NotifierFactory.create(
-          settings.NOTIFIER || 'googlechat',
-          settings
-        );
-
-        console.log('[' + job.jobName + '] Sending notification...');
-        var title = job.jobName + ': ' + emails.length + ' email(s)';
-        notifier.send(title, analysis.summary);
-      }
-    }
-
-    // Step 7: Remove processing label from emails
-    if (dryRun) {
-      console.log(prefix + '[' + job.jobName + '] Would remove labels from ' + emails.length + ' emails (skipped in dry run)');
-    } else {
-      console.log('[' + job.jobName + '] Removing labels from processed emails...');
-      removeLabelFromEmails(job.label, emails);
+    if (!result.summary) {
+      result.summary = 'Processed ' + result.emailCount + ' email(s)';
     }
 
     result.success = true;
@@ -354,6 +257,191 @@ function executeJob(job, settings, options) {
   }
 
   return result;
+}
+
+/**
+ * Process a single chunk of emails: analyze (via the per-job webhook or the
+ * configured LLM), apply per-email actions, notify, and remove the processing
+ * label for this chunk. Throws on failure so the caller stops and leaves the
+ * remaining chunks labeled for a retry.
+ * @returns {Object} { starred, labeled, summary, warning, partial }
+ */
+function processEmailBatch_(emails, job, settings, dryRun, verbose, labelPrefix, prefix) {
+  var batch = { starred: 0, labeled: 0, summary: '', warning: '', partial: false };
+
+  if (verbose) {
+    for (var i = 0; i < emails.length; i++) {
+      console.log(prefix + '[' + job.jobName + '] Email ' + (i + 1) + ': ' + emails[i].subject + ' (from: ' + emails[i].from + ')');
+    }
+  }
+
+  var analysis;
+
+  if (job.webhookUrl) {
+    // Webhook-override path: fire-and-forget. POST the chunk, expect a fast 2xx
+    // ack; the webhook does the heavy processing (and its own notification)
+    // asynchronously. If it returns an analysis body we use it, otherwise
+    // MailBot does nothing further for this chunk.
+    console.log(prefix + '[' + job.jobName + '] Forwarding ' + emails.length +
+      ' email(s) to webhook: ' + job.webhookUrl);
+    var webhookResult = sendJobToWebhook_(job, emails, settings);
+    analysis = webhookResult.analysis; // analysis object, or null for a bare ack
+    if (!analysis) {
+      batch.summary = 'Forwarded ' + emails.length + ' email(s) to the webhook';
+      console.log(prefix + '[' + job.jobName +
+        '] Webhook accepted (2xx); MailBot will not notify/label/star for this batch');
+    }
+  } else {
+    // Fetch existing labels if auto-labeling is enabled (LLM prompt hint).
+    var existingLabels = [];
+    if (job.autoLabel) {
+      console.log(prefix + '[' + job.jobName + '] Fetching existing labels for auto-labeling...');
+      existingLabels = getAllUserLabels();
+      if (verbose) {
+        console.log(prefix + '[' + job.jobName + '] Found ' + existingLabels.length + ' existing labels');
+      }
+    }
+
+    // Format emails and send to the LLM (compression is per-job).
+    var formattedContent = formatEmailsForLLM(emails, job.compression);
+
+    if (verbose) {
+      console.log(prefix + '[' + job.jobName + '] Formatted content length: ' + formattedContent.length + ' chars');
+      console.log(prefix + '[' + job.jobName + '] Using prompt: ' + job.prompt.substring(0, 100) + '...');
+    }
+
+    var llmProvider = LLMFactory.create(
+      settings.LLM_PROVIDER || 'anthropic',
+      settings
+    );
+
+    console.log(prefix + '[' + job.jobName + '] Analyzing with LLM...');
+
+    var llmOptions = {
+      existingLabels: existingLabels,
+      enableLabeling: job.autoLabel === true,
+      enableStarring: job.autoStar === true
+    };
+
+    analysis = llmProvider.analyze(job.prompt, formattedContent, llmOptions);
+
+    // Retry once on an incomplete/invented analysis (LLM path only - it re-runs
+    // the model). Keep whichever attempt covered more of the chunk.
+    var completeness = checkAnalysisCompleteness_(emails.length, analysis.emails);
+    if (!completeness.complete) {
+      console.warn(prefix + '[' + job.jobName + '] Analysis incomplete (covered ' +
+        completeness.analyzed + '/' + emails.length + '), retrying once...');
+      var retryAnalysis = llmProvider.analyze(job.prompt, formattedContent, llmOptions);
+      var retryCompleteness = checkAnalysisCompleteness_(emails.length, retryAnalysis.emails);
+      if (retryCompleteness.complete || retryCompleteness.analyzed > completeness.analyzed) {
+        analysis = retryAnalysis;
+      }
+    }
+  }
+
+  // Post-analysis processing runs only when we actually have an analysis object
+  // (the LLM path, or a webhook that returned one). A bare webhook ack skips to
+  // label removal below.
+  if (analysis) {
+    annotateCompleteness_(batch, analysis, emails.length, prefix, job.jobName);
+
+    if (verbose) {
+      console.log(prefix + '[' + job.jobName + '] LLM summary length: ' + analysis.summary.length + ' chars');
+      console.log(prefix + '[' + job.jobName + '] LLM isImportant: ' + analysis.isImportant);
+      console.log(prefix + '[' + job.jobName + '] LLM emails array: ' + JSON.stringify(analysis.emails));
+    }
+
+    // Per-email actions (starring and labeling).
+    if (analysis.emails && analysis.emails.length > 0) {
+      processEmailActions_(emails, analysis.emails, job, labelPrefix, dryRun, verbose, prefix, batch);
+    }
+
+    // Decide whether to notify based on condition.
+    var shouldNotify = false;
+    if (job.notifyCondition === 'always') {
+      shouldNotify = true;
+    } else if (job.notifyCondition === 'conditional') {
+      shouldNotify = analysis.isImportant;
+      if (!shouldNotify) {
+        console.log(prefix + '[' + job.jobName + '] LLM says not important, skipping notification');
+      }
+    }
+
+    if (shouldNotify) {
+      if (dryRun) {
+        console.log(prefix + '[' + job.jobName + '] Would send notification (skipped in dry run)');
+        console.log(prefix + '[' + job.jobName + '] Notification content: ' + analysis.summary.substring(0, 200) + '...');
+      } else {
+        var notifier = NotifierFactory.create(
+          settings.NOTIFIER || 'googlechat',
+          settings
+        );
+
+        console.log('[' + job.jobName + '] Sending notification...');
+        var title = job.jobName + ': ' + emails.length + ' email(s)';
+        notifier.send(title, analysis.summary);
+      }
+    }
+  }
+
+  // Remove the processing label for this chunk (reached only on success, so a
+  // failed chunk keeps its label and is retried on the next run).
+  if (dryRun) {
+    console.log(prefix + '[' + job.jobName + '] Would remove labels from ' + emails.length + ' emails (skipped in dry run)');
+  } else {
+    console.log('[' + job.jobName + '] Removing labels from processed emails...');
+    removeLabelFromEmails(job.label, emails);
+  }
+
+  return batch;
+}
+
+/**
+ * Run the completeness check against an analysis and record the outcome on the
+ * result: set result.summary/partial, and on a partial/invented analysis log a
+ * warning, set result.warning, and append a human-facing note to the summary.
+ * Shared by the LLM path and a webhook that returns an analysis body.
+ * @param {Object} result - Result object to update (mutated)
+ * @param {Object} analysis - { summary, isImportant, emails }
+ * @param {number} emailCount - Number of emails sent
+ * @param {string} prefix - Log prefix
+ * @param {string} jobName - Job name for logs
+ */
+function annotateCompleteness_(result, analysis, emailCount, prefix, jobName) {
+  var completeness = checkAnalysisCompleteness_(emailCount, analysis.emails);
+  result.summary = analysis.summary;
+  result.partial = !completeness.complete;
+
+  if (completeness.complete) {
+    return;
+  }
+
+  var incomplete = completeness.missing.length > 0;
+  var invented = completeness.hallucinated.length > 0;
+
+  var warn = 'Analysis issue: covered ' + completeness.analyzed + ' of ' +
+    emailCount + ' emails';
+  if (incomplete) {
+    warn += '; missing: ' + completeness.missing.join(',');
+  }
+  if (invented) {
+    warn += '; invalid indices: ' + completeness.hallucinated.join(',');
+  }
+  console.warn(prefix + '[' + jobName + '] ' + warn);
+  result.warning = warn;
+
+  // Tailor the human-facing note to what actually went wrong.
+  var note;
+  if (incomplete && invented) {
+    note = 'This digest may be incomplete and may reference emails that were not sent.';
+  } else if (incomplete) {
+    note = 'This digest may be incomplete.';
+  } else {
+    note = 'The model referenced email(s) that were not sent, so some details may be invented.';
+  }
+
+  analysis.summary = analysis.summary + '\n\n⚠️ _' + warn + '. ' + note + '_';
+  result.summary = analysis.summary;
 }
 
 /**

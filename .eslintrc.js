@@ -53,6 +53,13 @@ module.exports = {
     'formatEmailsForLLM': 'readonly',
     'bodyText_': 'readonly',
     'stripQuotedText_': 'readonly',
+    'compressBody_': 'readonly',
+    'normalizeCompression_': 'readonly',
+    'perEmailCap_': 'readonly',
+    'compressedEmails': 'readonly',
+    'annotateCompleteness_': 'readonly',
+    'sendJobToWebhook_': 'readonly',
+    'parseWebhookAnalysis_': 'readonly',
     'getOrCreateLabel': 'readonly',
     'getAllUserLabels': 'readonly',
     'starThread': 'readonly',
@@ -83,6 +90,7 @@ module.exports = {
     'SETTINGS_TAB': 'readonly',
     'JOBS_TAB': 'readonly',
     'EXECUTION_LOG_TAB': 'readonly',
-    'JOBS_COLUMNS': 'readonly'
+    'JOB_COLUMN_ORDER': 'readonly',
+    'buildColumnMap_': 'readonly'
   }
 };

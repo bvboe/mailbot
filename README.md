@@ -7,6 +7,9 @@ A Google Apps Script bot that monitors Gmail, analyzes emails via LLM (Anthropic
 - **Multi-job support**: Configure multiple jobs with different schedules, labels, and prompts
 - **Pluggable LLM providers**: Supports Anthropic Claude (default), Google Gemini, and Ollama
 - **Pluggable notifiers**: Google Chat webhooks and Signal (custom wrapper endpoint)
+- **Per-job compression**: `none` / `medium` / `high` body trimming to match the model (big-context vs. small self-hosted)
+- **Per-job batch size**: Cap emails per run (e.g. 1) for predictable runs on small models
+- **Per-job webhook override**: Route a job to your own async service instead of the configured LLM
 - **Flexible scheduling**: Run jobs at intervals or specific times
 - **Conditional notifications**: Only notify when the LLM flags something as important
 - **Sidebar control panel**: Manage jobs, test notifications, and control the scheduler from a sidebar UI
@@ -74,8 +77,10 @@ Open the Google Sheet and fill in the Settings tab:
 | OLLAMA_API_KEY | your-key | Value sent in the auth header (blank if endpoint needs no auth) |
 | OLLAMA_AUTH_HEADER | X-Api-Key | Name of the auth header carrying the key (deployment specific) |
 | OLLAMA_MODEL | qwen3:8b | Ollama model to use |
-| OLLAMA_NUM_CTX | 8192 | Context window; larger fits more emails but uses more endpoint memory |
+| OLLAMA_NUM_CTX | 12288 | Context window; larger fits more emails but uses more endpoint memory |
 | GOOGLE_CHAT_WEBHOOK_URL | webhook-url | Create in Google Chat space settings |
+| WEBHOOK_API_KEY | your-key | Auth key sent when a job uses a WebhookURL override (can equal your Ollama key) |
+| WEBHOOK_AUTH_HEADER | X-Api-Key | Header name carrying WEBHOOK_API_KEY (deployment specific) |
 | SIGNAL_URL | https://host | Signal wrapper endpoint base URL (`/send` appended automatically) |
 | SIGNAL_API_KEY | your-key | Value sent in the auth header (blank if endpoint needs no auth) |
 | SIGNAL_AUTH_HEADER | X-Api-Key | Name of the auth header carrying the key (deployment specific) |
@@ -137,7 +142,9 @@ mailbot/
 │   ├── Main.gs                # Entry point, trigger handlers
 │   ├── Config.gs              # Settings, jobs, and setup functions
 │   ├── JobRunner.gs           # Job execution logic, scheduling
-│   ├── GmailService.gs        # Gmail operations (fetch, label)
+│   ├── GmailService.gs        # Gmail operations (fetch, label, compression)
+│   ├── WebhookProcessor.gs    # Per-job webhook override (fire-and-forget)
+│   ├── DevExport.gs           # Dev utility: export recent inbox to Drive as JSON
 │   ├── Logger.gs              # Execution logging to sheet
 │   ├── SidebarController.gs   # Server-side sidebar functions
 │   ├── Sidebar.html           # Sidebar UI
@@ -183,7 +190,45 @@ Jobs are configured in the Jobs tab:
 | Prompt | LLM prompt for analyzing emails |
 | ScheduleType | `interval` or `specific_times` |
 | ScheduleValue | Minutes for interval, or comma-separated times (e.g., `08:00,18:00`) |
-| NotifyCondition | `always` or `conditional` |
+| NotifyCondition | `always` or `conditional` (only notify if flagged important) |
+| AutoLabel | TRUE/FALSE — let the LLM apply Gmail labels per email |
+| AutoStar | TRUE/FALSE — let the LLM star important emails |
+| Compression | `none` / `medium` / `high` (blank = medium) — how much to trim bodies before sending. See below |
+| BatchSize | Max emails processed per run. Blank/`0` = no limit; `>0` caps the batch (rest picked up next run) |
+| WebhookURL | Optional. If set, POST the batch here instead of the configured LLM (see below) |
+
+The `LastRun*` columns are written by the bot; leave them blank.
+
+### Compression levels
+
+| Level | Behavior | Use for |
+|-------|----------|---------|
+| `none` | Full bodies, untouched | Large-context models (e.g. Anthropic 1M) |
+| `medium` | Collapse whitespace + per-email char cap | General default |
+| `high` | Strip quoted replies/signatures + collapse tracking URLs to `[link]` + per-batch budget | Small/self-hosted models, large batches |
+
+### BatchSize
+
+Set `BatchSize = 1` for the every-5-minute urgent job on a small model to keep each
+run predictable (one email at a time). Only the processed batch has its label
+removed, so a backlog drains one run at a time.
+
+### WebhookURL (per-job override)
+
+If a job has a `WebhookURL`, MailBot POSTs the batch to it **instead of** calling
+the configured LLM. It's fire-and-forget: MailBot sends structured, compression-aware
+JSON (`{ job, emails[] }`), expects a fast **2xx ack**, and lets the webhook do the
+processing (and its own notification) asynchronously.
+
+- On `2xx`: the processing label is removed. If the response body contains an
+  analysis (`{ summary, isImportant, emails }`), MailBot uses it (notify/label/star);
+  otherwise MailBot does nothing further.
+- On failure: the label is kept (retried next run) and an error notification is sent.
+- Transient failures (5xx/429/network) are retried with backoff.
+- Auth: `WEBHOOK_API_KEY` sent in `WEBHOOK_AUTH_HEADER` (default `X-Api-Key`).
+
+Tip: pair with `Compression = none` to ship full bodies to a lab service that does
+its own compression / map-reduce.
 
 ## Label Strategy
 

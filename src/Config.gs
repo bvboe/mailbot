@@ -3,7 +3,7 @@
  *
  * Expected sheet structure:
  * - Settings tab: Key-value pairs (A=key, B=value)
- * - Jobs tab: Job configurations with columns defined in JOBS_COLUMNS
+ * - Jobs tab: Job configurations addressed by header name (see JOB_COLUMN_ORDER)
  */
 
 // Sheet ID - UPDATE THIS after creating your Google Sheet
@@ -13,22 +13,33 @@ const SETTINGS_TAB = 'Settings';
 const JOBS_TAB = 'Jobs';
 const EXECUTION_LOG_TAB = 'ExecutionLog';
 
-// Jobs table column indices (0-based)
-const JOBS_COLUMNS = {
-  JOB_NAME: 0,
-  ENABLED: 1,
-  LABEL: 2,
-  PROMPT: 3,
-  SCHEDULE_TYPE: 4,
-  SCHEDULE_VALUE: 5,
-  NOTIFY_CONDITION: 6,
-  AUTO_LABEL: 7,
-  AUTO_STAR: 8,
-  LAST_RUN: 9,
-  LAST_RUN_STATUS: 10,
-  LAST_RUN_EMAIL_COUNT: 11,
-  LAST_RUN_ERROR: 12
-};
+// The Jobs tab is addressed by HEADER NAME (not fixed position), so columns can
+// be reordered or new ones inserted without breaking reads/writes, and an
+// absent column simply falls back to a default. This array also defines the
+// default column order used when creating a fresh sheet.
+const JOB_COLUMN_ORDER = [
+  'JobName', 'Enabled', 'Label', 'Prompt', 'ScheduleType', 'ScheduleValue',
+  'NotifyCondition', 'AutoLabel', 'AutoStar',
+  'Compression', 'BatchSize', 'WebhookURL',
+  'LastRun', 'LastRunStatus', 'LastRunEmailCount', 'LastRunError'
+];
+
+/**
+ * Build a case-insensitive header-name -> 0-based column index map from a
+ * sheet's header row.
+ * @param {Array} headerRow
+ * @returns {Object}
+ */
+function buildColumnMap_(headerRow) {
+  const map = {};
+  for (let i = 0; i < headerRow.length; i++) {
+    const name = String(headerRow[i] || '').trim().toLowerCase();
+    if (name) {
+      map[name] = i;
+    }
+  }
+  return map;
+}
 
 /**
  * Load all global settings from the Settings tab
@@ -58,28 +69,43 @@ function loadSettings() {
 function loadJobs() {
   const sheet = getSheet_(JOBS_TAB);
   const data = sheet.getDataRange().getValues();
-  const jobs = [];
+  if (data.length < 2) {
+    return [];
+  }
 
-  // Skip header row
+  const col = buildColumnMap_(data[0]);
+  // Read a cell by header name; returns '' if that column doesn't exist.
+  const val = (row, header) => {
+    const i = col[header.toLowerCase()];
+    return i === undefined ? '' : row[i];
+  };
+
+  const jobs = [];
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if (!row[JOBS_COLUMNS.JOB_NAME]) continue; // Skip empty rows
+    if (!val(row, 'JobName')) continue; // Skip empty rows
 
     jobs.push({
       rowIndex: i + 1, // 1-based for sheet operations
-      jobName: row[JOBS_COLUMNS.JOB_NAME],
-      enabled: row[JOBS_COLUMNS.ENABLED] === true || row[JOBS_COLUMNS.ENABLED] === 'TRUE',
-      label: row[JOBS_COLUMNS.LABEL],
-      prompt: row[JOBS_COLUMNS.PROMPT],
-      scheduleType: row[JOBS_COLUMNS.SCHEDULE_TYPE],
-      scheduleValue: String(row[JOBS_COLUMNS.SCHEDULE_VALUE]),
-      notifyCondition: row[JOBS_COLUMNS.NOTIFY_CONDITION],
-      autoLabel: row[JOBS_COLUMNS.AUTO_LABEL] === true || row[JOBS_COLUMNS.AUTO_LABEL] === 'TRUE',
-      autoStar: row[JOBS_COLUMNS.AUTO_STAR] === true || row[JOBS_COLUMNS.AUTO_STAR] === 'TRUE',
-      lastRun: row[JOBS_COLUMNS.LAST_RUN],
-      lastRunStatus: row[JOBS_COLUMNS.LAST_RUN_STATUS],
-      lastRunEmailCount: row[JOBS_COLUMNS.LAST_RUN_EMAIL_COUNT],
-      lastRunError: row[JOBS_COLUMNS.LAST_RUN_ERROR]
+      jobName: val(row, 'JobName'),
+      enabled: val(row, 'Enabled') === true || val(row, 'Enabled') === 'TRUE',
+      label: val(row, 'Label'),
+      prompt: val(row, 'Prompt'),
+      scheduleType: val(row, 'ScheduleType'),
+      scheduleValue: String(val(row, 'ScheduleValue')),
+      notifyCondition: val(row, 'NotifyCondition'),
+      autoLabel: val(row, 'AutoLabel') === true || val(row, 'AutoLabel') === 'TRUE',
+      autoStar: val(row, 'AutoStar') === true || val(row, 'AutoStar') === 'TRUE',
+      lastRun: val(row, 'LastRun'),
+      lastRunStatus: val(row, 'LastRunStatus'),
+      lastRunEmailCount: val(row, 'LastRunEmailCount'),
+      lastRunError: val(row, 'LastRunError'),
+      // Per-job compression level: 'none' | 'medium' | 'high' (default medium).
+      compression: String(val(row, 'Compression') || ''),
+      // Max emails to process per run: 0/blank = no limit, >0 = cap.
+      batchSize: parseInt(val(row, 'BatchSize'), 10) || 0,
+      // If set, POST the batch here instead of calling the configured LLM.
+      webhookUrl: String(val(row, 'WebhookURL') || '').trim()
     });
   }
 
@@ -97,11 +123,21 @@ function loadJobs() {
 function updateJobStatus(rowIndex, lastRun, status, emailCount, error) {
   const sheet = getSheet_(JOBS_TAB);
 
-  // Update LastRun through LastRunError columns (J through M with new columns)
-  const startCol = JOBS_COLUMNS.LAST_RUN + 1; // 1-based
-  sheet.getRange(rowIndex, startCol, 1, 4).setValues([
-    [lastRun, status, emailCount, error || '']
-  ]);
+  // Write each status field by header name, so column order/position doesn't
+  // matter and the fields need not be contiguous.
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const col = buildColumnMap_(header);
+  const set = (name, value) => {
+    const i = col[name.toLowerCase()];
+    if (i !== undefined) {
+      sheet.getRange(rowIndex, i + 1).setValue(value);
+    }
+  };
+
+  set('LastRun', lastRun);
+  set('LastRunStatus', status);
+  set('LastRunEmailCount', emailCount);
+  set('LastRunError', error || '');
 }
 
 /**
@@ -242,6 +278,8 @@ function setupSettingsTab_(sheet) {
     ['OLLAMA_MODEL', 'qwen3:8b', 'Ollama model to use (e.g. qwen3:8b, llama3.1:8b)'],
     ['OLLAMA_NUM_CTX', '12288', 'Context window (num_ctx). Larger fits more emails but uses more endpoint memory. 12288 is a safe max for an 8B model on an 8GB Jetson'],
     ['GOOGLE_CHAT_WEBHOOK_URL', '', 'Create a webhook in Google Chat space settings'],
+    ['WEBHOOK_API_KEY', '', 'Auth key sent when a job uses a WebhookURL override (can equal your Ollama key)'],
+    ['WEBHOOK_AUTH_HEADER', 'X-Api-Key', 'Header name carrying WEBHOOK_API_KEY (deployment specific)'],
     ['SIGNAL_URL', '', 'Signal wrapper endpoint base URL (e.g. https://your-host). /send is appended automatically'],
     ['SIGNAL_API_KEY', '', 'Value sent in the auth header (leave blank if the endpoint needs no auth)'],
     ['SIGNAL_AUTH_HEADER', 'X-Api-Key', 'Name of the auth header carrying SIGNAL_API_KEY (deployment specific)'],
@@ -268,11 +306,9 @@ function setupSettingsTab_(sheet) {
  */
 function setupJobsTab_(sheet) {
   // Headers
-  const headers = [
-    'JobName', 'Enabled', 'Label', 'Prompt', 'ScheduleType',
-    'ScheduleValue', 'NotifyCondition', 'AutoLabel', 'AutoStar',
-    'LastRun', 'LastRunStatus', 'LastRunEmailCount', 'LastRunError'
-  ];
+  // Default column order for a fresh sheet. Reads/writes are by header name,
+  // so users may later reorder these without breaking anything.
+  const headers = JOB_COLUMN_ORDER;
 
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f3f3f3');
@@ -289,7 +325,10 @@ function setupJobsTab_(sheet) {
       'conditional',
       true,   // AutoLabel
       true,   // AutoStar
-      '', '', '', ''
+      'medium', // Compression
+      '', // BatchSize (blank = no limit; set to 1 for predictable urgent runs)
+      '', // WebhookURL (blank = use the configured LLM)
+      '', '', '', '' // LastRun, LastRunStatus, LastRunEmailCount, LastRunError
     ],
     [
       'daily-summary',
@@ -301,7 +340,10 @@ function setupJobsTab_(sheet) {
       'always',
       false,  // AutoLabel
       false,  // AutoStar
-      '', '', '', ''
+      'high', // Compression
+      '', // BatchSize (blank = no limit)
+      '', // WebhookURL (blank = use the configured LLM)
+      '', '', '', '' // LastRun, LastRunStatus, LastRunEmailCount, LastRunError
     ]
   ];
 
@@ -317,10 +359,13 @@ function setupJobsTab_(sheet) {
   sheet.setColumnWidth(7, 110);  // NotifyCondition
   sheet.setColumnWidth(8, 80);   // AutoLabel
   sheet.setColumnWidth(9, 80);   // AutoStar
-  sheet.setColumnWidth(10, 150); // LastRun
-  sheet.setColumnWidth(11, 100); // LastRunStatus
-  sheet.setColumnWidth(12, 120); // LastRunEmailCount
-  sheet.setColumnWidth(13, 200); // LastRunError
+  sheet.setColumnWidth(10, 110); // Compression
+  sheet.setColumnWidth(11, 90);  // BatchSize
+  sheet.setColumnWidth(12, 260); // WebhookURL
+  sheet.setColumnWidth(13, 150); // LastRun
+  sheet.setColumnWidth(14, 100); // LastRunStatus
+  sheet.setColumnWidth(15, 120); // LastRunEmailCount
+  sheet.setColumnWidth(16, 200); // LastRunError
 
   // Add data validation for Enabled column
   const enabledRule = SpreadsheetApp.newDataValidation()
@@ -352,6 +397,12 @@ function setupJobsTab_(sheet) {
     .build();
   sheet.getRange('I2:I100').setDataValidation(autoStarRule);
 
+  // Add data validation for Compression column (column J)
+  const compressionRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['none', 'medium', 'high'])
+    .build();
+  sheet.getRange('J2:J100').setDataValidation(compressionRule);
+
   // Add notes
   sheet.getRange('C1').setNote('Gmail label to monitor. Create matching Gmail filter rules.');
   sheet.getRange('E1').setNote('interval = run every N minutes\nspecific_times = run at specific times');
@@ -359,6 +410,9 @@ function setupJobsTab_(sheet) {
   sheet.getRange('G1').setNote('always = always notify\nconditional = only if LLM flags as important');
   sheet.getRange('H1').setNote('Enable LLM-based auto-labeling of emails (e.g., Internal, Customers/Acme)');
   sheet.getRange('I1').setNote('Enable LLM-based starring of important emails');
+  sheet.getRange('J1').setNote('Body compression before sending to the LLM:\nnone = full bodies (big-context models)\nmedium = whitespace-collapse + per-email cap\nhigh = strip quotes/URLs + per-batch budget (small models / big batches)\nBlank defaults to medium.');
+  sheet.getRange('K1').setNote('Max emails processed per run.\nBlank or 0 = no limit.\n>0 = cap the batch (e.g. 1 for predictable urgent runs on small models). The remainder keeps its label and is processed on the next run.');
+  sheet.getRange('L1').setNote('Optional. If set, MailBot POSTs the batch to this URL instead of the configured LLM (fire-and-forget; expects a 2xx ack). Auth via WEBHOOK_API_KEY / WEBHOOK_AUTH_HEADER in Settings.');
 }
 
 /**

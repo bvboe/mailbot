@@ -39,6 +39,12 @@ function sendJobToWebhook_(job, emails, settings) {
       notifyCondition: job.notifyCondition,
       compression: job.compression
     },
+    // Notification settings so the webhook can deliver the result itself.
+    notify: {
+      notifier: settings.NOTIFIER || 'googlechat',
+      googleChatWebhookUrl: settings.GOOGLE_CHAT_WEBHOOK_URL || '',
+      signalRecipient: settings.SIGNAL_RECIPIENT || ''
+    },
     // Structured, compression-aware records so the webhook can map-reduce.
     emails: compressedEmails(emails, job.compression)
   };

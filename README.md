@@ -240,7 +240,9 @@ removed, so a backlog drains one run at a time.
 
 If a job has a `WebhookURL`, MailBot POSTs the batch to it **instead of** calling
 the configured LLM. It's fire-and-forget: MailBot sends structured, compression-aware
-JSON (`{ job, emails[] }`), expects a fast **2xx ack**, and lets the webhook do the
+JSON (`{ job, notify, emails[] }` — where `notify` carries `notifier` /
+`googleChatWebhookUrl` / `signalRecipient` so the webhook can deliver the
+result itself), expects a fast **2xx ack**, and lets the webhook do the
 processing (and its own notification) asynchronously.
 
 - On `2xx`: the processing label is removed. If the response body contains an

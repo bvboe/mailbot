@@ -94,7 +94,8 @@ function buildSignalText_(title, content, isError) {
   }
 
   var icon = isError ? '⚠️' : '📧';
-  return icon + ' ' + title + '\n\n' + (content || '');
+  // Signal renders **text** as bold; make the title stand out from the body.
+  return icon + ' **' + title + '**\n\n' + (content || '');
 }
 
 /**

@@ -45,19 +45,34 @@ function createGoogleChatNotifier(webhookUrl) {
  * @returns {Object} Message payload
  */
 function buildChatCard_(title, content, isError) {
-  // Truncate content if too long (Chat has limits)
+  // Truncate content if too long (Chat has limits). Surrogate-safe so an emoji
+  // at the boundary can't leave a lone half-pair in the payload.
   var maxLength = 4000;
   if (content && content.length > maxLength) {
-    content = content.substring(0, maxLength - 50) + '\n\n... [truncated]';
+    content = truncateSafe_(content, maxLength - 50) + '\n\n... [truncated]';
   }
 
   var icon = isError ? '⚠️' : '📧';
   var separator = '─'.repeat(30);
-  var text = icon + ' *' + title + '*\n' + separator + '\n\n' + content;
+  // The LLM emits canonical Markdown (**bold**, _italic_); the destination
+  // client decides the on-the-wire syntax. Google Chat bold is *single*.
+  var text = icon + ' ' + renderMarkupGoogleChat_('**' + title + '**') + '\n' +
+    separator + '\n\n' + renderMarkupGoogleChat_(content || '');
 
   return {
     text: text
   };
+}
+
+/**
+ * Render canonical Markdown to Google Chat's text syntax. Google Chat bold is a
+ * *single* asterisk and italic is _underscore_, so we only need to collapse
+ * **bold** -> *bold*; underscores are already correct.
+ * @param {string} text - Canonical Markdown
+ * @returns {string} Google Chat formatted text
+ */
+function renderMarkupGoogleChat_(text) {
+  return String(text || '').replace(/\*\*([^*\n]+)\*\*/g, '*$1*');
 }
 
 /**

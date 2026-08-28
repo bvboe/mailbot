@@ -180,6 +180,28 @@ function executeJob(job, settings, options) {
       return result;
     }
 
+    // Idempotency: skip messages this job already processed in a prior run
+    // whose label survived (label removal failed, or the run died after
+    // notify/ack). The trigger label alone can't prevent a re-notify - see
+    // ProcessedLedger.gs. Clear the stale label so they stop reappearing.
+    var partition = ledgerPartition_(job.jobName, emails);
+    if (partition.already.length > 0) {
+      console.log(prefix + '[' + job.jobName + '] Skipping ' +
+        partition.already.length + ' already-processed email(s) still carrying ' +
+        'the label; clearing their label.');
+      if (!dryRun) {
+        removeLabelFromEmails(job.label, partition.already);
+      }
+    }
+    emails = partition.fresh;
+    if (emails.length === 0) {
+      console.log(prefix + '[' + job.jobName + '] No new emails to process');
+      result.success = true;
+      result.summary = 'No new emails to process';
+      result.emailCount = 0;
+      return result;
+    }
+
     // Drain the whole backlog. BatchSize caps how many emails go to the LLM (or
     // webhook) in a SINGLE call (0/blank = all at once); we loop over chunks
     // until every labeled email is processed. Each chunk is an independent
@@ -382,6 +404,14 @@ function processEmailBatch_(emails, job, settings, dryRun, verbose, labelPrefix,
         notifier.send(title, analysis.summary);
       }
     }
+  }
+
+  // Record these as processed BEFORE clearing the label, so that if label
+  // removal fails (or the run dies right here) the next run skips them rather
+  // than re-notifying. Reached only after a successful LLM notify or webhook
+  // 2xx ack, so we never mark an email we failed to hand off.
+  if (!dryRun) {
+    ledgerMark_(job.jobName, emails);
   }
 
   // Remove the processing label for this chunk (reached only on success, so a

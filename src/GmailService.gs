@@ -165,6 +165,29 @@ function normalizeCompression_(level) {
 }
 
 /**
+ * Truncate a string to at most `cap` UTF-16 code units WITHOUT splitting an
+ * emoji/surrogate pair. A plain slice can cut between a high and low surrogate,
+ * leaving a lone high surrogate (\uD800-\uDBFF) that is not valid text in any
+ * encoding: JSON.stringify emits it, JSON.parse accepts it, and it only blows
+ * up when something finally UTF-8-encodes it (e.g. the webhook receiver). We
+ * drop a trailing lone high surrogate so the output is always valid.
+ * @param {string} s - Input string
+ * @param {number} cap - Maximum length in code units
+ * @returns {string} Safely truncated string (no suffix appended)
+ */
+function truncateSafe_(s, cap) {
+  if (!s || s.length <= cap) {
+    return s || '';
+  }
+  var out = s.slice(0, cap);
+  var last = out.charCodeAt(out.length - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) {
+    out = out.slice(0, -1); // don't end on the first half of a surrogate pair
+  }
+  return out;
+}
+
+/**
  * Compress an email body according to the job's compression level. Output size
  * is a strict ladder: none >= medium >= high.
  *   none   - raw body, untouched (largest)
@@ -213,7 +236,7 @@ function compressBody_(body, level, perEmailCap) {
   body = body.replace(/\s+/g, ' ').trim();
 
   if (perEmailCap > 0 && body.length > perEmailCap) {
-    body = body.substring(0, perEmailCap) + '... [trimmed]';
+    body = truncateSafe_(body, perEmailCap) + '... [trimmed]';
   }
 
   return body;

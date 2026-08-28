@@ -90,12 +90,29 @@ function normalizeSignalUrl_(url) {
 function buildSignalText_(title, content, isError) {
   var maxLength = 4000;
   if (content && content.length > maxLength) {
-    content = content.substring(0, maxLength - 50) + '\n\n... [truncated]';
+    // Surrogate-safe so an emoji at the boundary can't leave a lone half-pair.
+    content = truncateSafe_(content, maxLength - 50) + '\n\n... [truncated]';
   }
 
   var icon = isError ? '⚠️' : '📧';
-  // Signal renders **text** as bold; make the title stand out from the body.
-  return icon + ' **' + title + '**\n\n' + (content || '');
+  // The LLM emits canonical Markdown (**bold**, _italic_); the destination
+  // client decides the on-the-wire syntax. Signal bold is already **text**;
+  // the title is bolded here so it stands out from the body.
+  return icon + ' ' + renderMarkupSignal_('**' + title + '**') + '\n\n' +
+    renderMarkupSignal_(content || '');
+}
+
+/**
+ * Render canonical Markdown to Signal's styled-text syntax. Signal bold is
+ * already **text** (left as-is); Signal italic is *text*, NOT _text_, so we
+ * convert _italic_ -> *italic*. The italic pattern requires a boundary around
+ * the underscores so it doesn't mangle snake_case words or URLs.
+ * @param {string} text - Canonical Markdown
+ * @returns {string} Signal styled text
+ */
+function renderMarkupSignal_(text) {
+  return String(text || '')
+    .replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,!?:;]|$)/g, '$1*$2*');
 }
 
 /**

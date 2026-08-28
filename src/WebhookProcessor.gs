@@ -85,21 +85,64 @@ function sendJobToWebhook_(job, emails, settings) {
       return { ok: true, analysis: null };
     }
 
-    // Retry on transient errors.
+    // Retry on transient errors. A 503 "queue full" from auto-server carries a
+    // Retry-After telling us how long to wait; honor it when present, otherwise
+    // fall back to exponential backoff.
     if (code >= 500 || code === 429) {
       lastError = new Error('Webhook error (' + code + '): ' + text);
-      console.log('Webhook attempt ' + (attempt + 1) + ' failed with ' + code + ', retrying...');
+      var delay = retryAfterMs_(response, retryDelays[attempt]);
+      console.log('Webhook attempt ' + (attempt + 1) + ' failed with ' + code +
+        ', retrying in ' + delay + 'ms...');
       if (attempt < maxRetries - 1) {
-        Utilities.sleep(retryDelays[attempt]);
+        Utilities.sleep(delay);
       }
       continue;
     }
 
-    // Non-retryable (4xx other than 429).
+    // Non-retryable (4xx other than 429). Throw so executeJob's catch surfaces
+    // it via our own error notification. Deliberate even though auto-server may
+    // ALSO alert on a 400: we can't assume it did, and a duplicate alert is
+    // safer than a silently dropped batch.
     throw new Error('Webhook error (' + code + '): ' + text);
   }
 
   throw lastError;
+}
+
+// Cap how long we will honor a Retry-After. Apps Script gives a run ~6 minutes
+// total, so a large delay could sleep the whole budget away.
+var MAX_RETRY_AFTER_MS = 30000;
+
+/**
+ * Compute a retry delay from a response's Retry-After header, falling back to
+ * the given backoff when the header is absent or not a plain seconds value.
+ * Supports the numeric "delay-seconds" form (what auto-server sends); the
+ * HTTP-date form falls back to backoff. Clamped to MAX_RETRY_AFTER_MS.
+ * @param {GoogleAppsScript.URL_Fetch.HTTPResponse} response
+ * @param {number} fallbackMs - Delay to use when there is no usable header
+ * @returns {number} Delay in milliseconds
+ */
+function retryAfterMs_(response, fallbackMs) {
+  var headers = response.getAllHeaders();
+  var value = null;
+  for (var key in headers) {
+    if (key.toLowerCase() === 'retry-after') {
+      value = headers[key];
+      break;
+    }
+  }
+  if (value === null || value === undefined) {
+    return fallbackMs;
+  }
+  // A repeated header comes back as an array of values.
+  if (Object.prototype.toString.call(value) === '[object Array]') {
+    value = value[0];
+  }
+  var seconds = parseInt(value, 10);
+  if (isNaN(seconds) || seconds < 0) {
+    return fallbackMs; // HTTP-date form (rare here) -> use backoff instead.
+  }
+  return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
 }
 
 /**

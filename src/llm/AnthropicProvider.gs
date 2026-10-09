@@ -48,7 +48,9 @@ function createAnthropicProvider(apiKey, model) {
 
       var requestBody = {
         model: modelId,
-        max_tokens: 2048,
+        // Newer models think by default and thinking counts against max_tokens,
+        // so leave room for both reasoning and the JSON answer.
+        max_tokens: 16000,
         system: systemPrompt,
         messages: [{
           role: 'user',
@@ -82,7 +84,19 @@ function createAnthropicProvider(apiKey, model) {
             throw new Error('Anthropic returned no content');
           }
 
-          var text = result.content[0].text;
+          // Newer models return thinking blocks before the text block, so
+          // content[0] is not necessarily text - collect all text blocks.
+          var text = result.content
+            .filter(function(block) { return block.type === 'text'; })
+            .map(function(block) { return block.text; })
+            .join('');
+
+          if (!text) {
+            throw new Error('Anthropic returned no text content (stop_reason: ' +
+              result.stop_reason + ', block types: ' +
+              result.content.map(function(b) { return b.type; }).join(', ') + ')');
+          }
+
           return parseStructuredResponse_(text);
         }
 
@@ -194,6 +208,8 @@ function parseStructuredResponse_(text) {
     isImportant: false,
     emails: []
   };
+
+  text = typeof text === 'string' ? text : '';
 
   try {
     // Try to extract JSON from the response
